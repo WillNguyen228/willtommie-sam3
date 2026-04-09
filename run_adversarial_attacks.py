@@ -5,6 +5,7 @@ Supports FGSM, PGD, and C&W attacks on SAM3 model
 
 import torch
 import torch.nn.functional as F
+import torch.fft as fft
 from PIL import Image
 from sam3 import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
@@ -82,6 +83,74 @@ class AdversarialAttacker:
         total_loss = -(detection_loss + presence_loss)
         
         return total_loss, outputs
+    
+    def compute_targeted_loss(self, image_tensor, source_prompt, target_prompt):
+        """
+        Compute loss for TARGETED adversarial attack
+        Goal: Minimize detection of source_prompt AND maximize detection of target_prompt
+        
+        Args:
+            image_tensor: Input image tensor
+            source_prompt: Original class to hide (e.g., "cat")
+            target_prompt: Target class to fake (e.g., "dog")
+        
+        Returns:
+            total_loss: Combined loss that encourages target class detection
+            source_outputs: Outputs for source prompt
+            target_outputs: Outputs for target prompt
+        """
+        # Get predictions for SOURCE class (we want to minimize this)
+        backbone_out_source = self.model.backbone.forward_image(image_tensor)
+        text_outputs_source = self.model.backbone.forward_text([source_prompt], device=self.device)
+        backbone_out_source.update(text_outputs_source)
+        geometric_prompt = self.model._get_dummy_prompt()
+        
+        source_outputs = self.model.forward_grounding(
+            backbone_out=backbone_out_source,
+            find_input=self.processor.find_stage,
+            geometric_prompt=geometric_prompt,
+            find_target=None,
+        )
+        
+        # Get predictions for TARGET class (we want to maximize this)
+        backbone_out_target = self.model.backbone.forward_image(image_tensor)
+        text_outputs_target = self.model.backbone.forward_text([target_prompt], device=self.device)
+        backbone_out_target.update(text_outputs_target)
+        
+        target_outputs = self.model.forward_grounding(
+            backbone_out=backbone_out_target,
+            find_input=self.processor.find_stage,
+            geometric_prompt=geometric_prompt,
+            find_target=None,
+        )
+        
+        # Source class: minimize ALL detection confidence
+        source_logits = source_outputs["pred_logits"].sigmoid()
+        source_presence = source_outputs["presence_logit_dec"].sigmoid()
+        # Use max to focus on suppressing the strongest detection
+        source_confidence = source_logits.max() + source_presence
+        
+        # Target class: maximize STRONGEST detections, but penalize too many
+        target_logits = target_outputs["pred_logits"].sigmoid()
+        target_presence = target_outputs["presence_logit_dec"].sigmoid()
+        
+        # Focus on top-k strongest detections (e.g., top 5)
+        k = min(5, target_logits.numel())
+        top_k_logits = torch.topk(target_logits.flatten(), k).values
+        
+        # Maximize the strongest detections
+        target_confidence = top_k_logits.mean() + target_presence
+        
+        # Add sparsity penalty: penalize having too many medium-confidence detections
+        # This encourages fewer, higher-confidence detections
+        threshold = 0.5
+        num_above_threshold = (target_logits > threshold).sum().float()
+        sparsity_loss = torch.relu(num_above_threshold - 3.0) * 0.1  # Penalty if more than 3 detections
+        
+        # Combined loss: minimize source, maximize target, encourage sparsity
+        total_loss = source_confidence - target_confidence + sparsity_loss
+        
+        return total_loss, source_outputs, target_outputs
     
     def apply_perturbation(self, original_image, perturbation, epsilon):
         """Apply perturbation and clip to valid range"""
@@ -221,21 +290,73 @@ class PGD(AdversarialAttacker):
 
 
 class CW(AdversarialAttacker):
-    """Carlini & Wagner L2 Attack"""
+    """Carlini & Wagner L2 Attack with Perceptual Improvements"""
     
-    def __init__(self, model, processor, c=1.0, kappa=0, iterations=100, learning_rate=0.01, device="cuda"):
+    def __init__(self, model, processor, c=10.0, kappa=0, iterations=100, learning_rate=0.05, 
+                 target_class=None, perceptual_weight=0.1, frequency_weight=0.05, device="cuda"):
         super().__init__(model, processor, device)
-        self.c = c
+        self.c = c  # Increased from 1.0 to 10.0 to prioritize attack success over perturbation size
         self.kappa = kappa
         self.iterations = iterations
-        self.learning_rate = learning_rate
+        self.learning_rate = learning_rate  # Increased from 0.01 to 0.05 for faster convergence
+        self.target_class = target_class  # If None, untargeted attack
+        self.perceptual_weight = perceptual_weight  # Weight for perceptual loss
+        self.frequency_weight = frequency_weight  # Weight for high-frequency penalty
+    
+    def compute_perceptual_loss(self, original, perturbed):
+        """
+        Compute perceptual loss to penalize visually noticeable differences.
+        Uses color space and local contrast metrics.
+        """
+        # L2 loss in LAB color space (more perceptually uniform than RGB)
+        # Approximate LAB conversion using weighted channels
+        # Convert from normalized space back to [0, 1]
+        orig_01 = (original * 0.5 + 0.5).clamp(0, 1)
+        pert_01 = (perturbed * 0.5 + 0.5).clamp(0, 1)
+        
+        # Simple perceptual weighting: human eye is more sensitive to changes in brightness (Y channel)
+        # than in chrominance (U, V channels)
+        orig_y = 0.299 * orig_01[:, 0] + 0.587 * orig_01[:, 1] + 0.114 * orig_01[:, 2]
+        pert_y = 0.299 * pert_01[:, 0] + 0.587 * pert_01[:, 1] + 0.114 * pert_01[:, 2]
+        
+        # Luminance loss (most perceptible)
+        luminance_loss = F.mse_loss(orig_y, pert_y)
+        
+        # Color loss (less perceptible, so lower weight)
+        color_loss = F.mse_loss(orig_01, pert_01)
+        
+        return 2.0 * luminance_loss + 0.5 * color_loss
+    
+    def compute_frequency_loss(self, perturbation):
+        """
+        Penalize high-frequency components in perturbation.
+        High-frequency noise is more visible to humans.
+        """
+        # Apply 2D FFT to perturbation
+        fft_pert = fft.fft2(perturbation)
+        fft_magnitude = torch.abs(fft_pert)
+        
+        # Create high-frequency mask (emphasize outer frequencies)
+        h, w = fft_magnitude.shape[-2], fft_magnitude.shape[-1]
+        center_h, center_w = h // 2, w // 2
+        y, x = torch.meshgrid(torch.arange(h, device=perturbation.device), 
+                              torch.arange(w, device=perturbation.device), indexing='ij')
+        
+        # Distance from center (low frequencies)
+        dist = torch.sqrt(((y - center_h) ** 2 + (x - center_w) ** 2).float())
+        high_freq_mask = (dist > min(h, w) * 0.3).float()  # Outer 70% are high frequencies
+        
+        # Penalize high-frequency energy
+        high_freq_energy = (fft_magnitude * high_freq_mask).mean()
+        
+        return high_freq_energy
         
     def attack(self, image, target_prompt):
         """
         Perform C&W attack
         Args:
             image: PIL Image
-            target_prompt: text prompt for detection
+            target_prompt: text prompt for detection (source class for targeted attack)
         Returns:
             adversarial_image: PIL Image with adversarial perturbation
             perturbation: the actual perturbation added
@@ -247,7 +368,11 @@ class CW(AdversarialAttacker):
         w = torch.zeros_like(original_tensor, requires_grad=True, device=self.device)
         optimizer = torch.optim.Adam([w], lr=self.learning_rate)
         
-        print(f"  Running C&W attack with {self.iterations} iterations...")
+        if self.target_class:
+            print(f"  Running TARGETED C&W attack with {self.iterations} iterations...")
+            print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
+        else:
+            print(f"  Running C&W attack with {self.iterations} iterations...")
         
         best_perturbation = None
         best_loss = float('inf')
@@ -259,15 +384,31 @@ class CW(AdversarialAttacker):
             # Normalize to SAM3's expected range
             perturbed_tensor = (perturbed_tensor - 0.5) / 0.5
             
-            # Compute loss
-            detection_loss, _ = self.compute_loss(perturbed_tensor, target_prompt)
+            # Compute loss based on attack type
+            if self.target_class:
+                # TARGETED attack: fool model to detect target_class instead of target_prompt
+                detection_loss, source_outputs, target_outputs = self.compute_targeted_loss(
+                    perturbed_tensor, target_prompt, self.target_class
+                )
+            else:
+                # UNTARGETED attack: minimize detection of target_prompt
+                detection_loss, _ = self.compute_loss(perturbed_tensor, target_prompt)
             
             # L2 distance penalty
             l2_dist = torch.norm(perturbed_tensor - original_tensor)
             
-            # Combined loss: C&W formulation
-            # We want to minimize detection while keeping perturbation small
-            total_loss = l2_dist + self.c * detection_loss
+            # Perceptual loss to reduce visible artifacts
+            perceptual_loss = self.compute_perceptual_loss(original_tensor, perturbed_tensor)
+            
+            # High-frequency penalty to make perturbations smoother
+            perturbation = perturbed_tensor - original_tensor
+            frequency_loss = self.compute_frequency_loss(perturbation)
+            
+            # Combined loss: C&W formulation with perceptual improvements
+            total_loss = (l2_dist + 
+                         self.c * detection_loss + 
+                         self.perceptual_weight * perceptual_loss + 
+                         self.frequency_weight * frequency_loss)
             
             # Optimization step
             optimizer.zero_grad()
@@ -280,8 +421,21 @@ class CW(AdversarialAttacker):
                 best_perturbation = perturbed_tensor.detach().clone()
             
             if (i + 1) % 20 == 0:
-                print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}, "
-                      f"L2: {l2_dist.item():.4f}, Detection: {detection_loss.item():.4f}")
+                if self.target_class:
+                    # For targeted attacks, also show source and target confidences
+                    with torch.no_grad():
+                        _, src_out, tgt_out = self.compute_targeted_loss(
+                            perturbed_tensor, target_prompt, self.target_class
+                        )
+                        src_conf = src_out["pred_logits"].sigmoid().max().item()
+                        tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
+                        # Count high-confidence target detections
+                        num_high_conf = (tgt_out["pred_logits"].sigmoid() > 0.5).sum().item()
+                        print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}, "
+                              f"L2: {l2_dist.item():.4f}, SrcMax: {src_conf:.4f}, TgtMax: {tgt_conf:.4f}, #Tgt>0.5: {num_high_conf}")
+                else:
+                    print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}, "
+                          f"L2: {l2_dist.item():.4f}, Detection: {detection_loss.item():.4f}")
         
         # Use best perturbation found and resize to original dimensions
         if best_perturbation is not None:
@@ -294,7 +448,231 @@ class CW(AdversarialAttacker):
         return adversarial_image, final_perturbation, best_loss
 
 
-def test_adversarial_attack(attack_method, image_path, animal_name, output_dir):
+class AdversarialSticker(AdversarialAttacker):
+    """Adversarial Patch/Sticker Attack - Creates a small localized circular perturbation"""
+    
+    def __init__(self, model, processor, patch_size=100, location='center', 
+                 c=10.0, iterations=200, learning_rate=0.1, target_class=None, device="cuda"):
+        super().__init__(model, processor, device)
+        self.patch_size = patch_size  # Diameter of circular sticker
+        self.location = location  # 'center', 'random', 'top-left', etc.
+        self.c = c
+        self.iterations = iterations
+        self.learning_rate = learning_rate
+        self.target_class = target_class
+    
+    def create_circular_mask(self, size, device):
+        """Create a circular mask for the sticker"""
+        # Create coordinate grid
+        y, x = torch.meshgrid(torch.arange(size, device=device), 
+                             torch.arange(size, device=device), indexing='ij')
+        
+        # Center of the patch
+        center = size / 2.0
+        
+        # Distance from center
+        dist = torch.sqrt((x - center + 0.5) ** 2 + (y - center + 0.5) ** 2)
+        
+        # Create circular mask (1 inside circle, 0 outside)
+        radius = size / 2.0
+        mask = (dist <= radius).float()
+        
+        # Add smooth edges with anti-aliasing
+        edge_width = 2.0
+        mask = torch.clamp((radius - dist) / edge_width + 0.5, 0, 1)
+        
+        return mask
+    
+    def get_patch_location(self, image_shape, patch_size):
+        """Determine where to place the patch"""
+        _, _, h, w = image_shape
+        
+        if self.location == 'center':
+            x = (w - patch_size) // 2
+            y = (h - patch_size) // 2
+        elif self.location == 'top-left':
+            x = 0
+            y = 0
+        elif self.location == 'top-right':
+            x = w - patch_size
+            y = 0
+        elif self.location == 'bottom-left':
+            x = 0
+            y = h - patch_size
+        elif self.location == 'bottom-right':
+            x = w - patch_size
+            y = h - patch_size
+        elif self.location == 'random':
+            x = np.random.randint(0, max(1, w - patch_size))
+            y = np.random.randint(0, max(1, h - patch_size))
+        else:
+            # Default to center
+            x = (w - patch_size) // 2
+            y = (h - patch_size) // 2
+        
+        # Ensure within bounds
+        x = max(0, min(x, w - patch_size))
+        y = max(0, min(y, h - patch_size))
+        
+        return x, y
+    
+    def apply_patch(self, image, patch, x, y, mask):
+        """Apply circular patch to image at location (x, y) using mask"""
+        _, _, h, w = image.shape
+        patch_h, patch_w = patch.shape[-2], patch.shape[-1]
+        
+        # Ensure patch fits
+        patch_h = min(patch_h, h - y)
+        patch_w = min(patch_w, w - x)
+        
+        # Trim mask if needed
+        trimmed_mask = mask[:patch_h, :patch_w]
+        
+        # Create modified image with circular blending
+        patched_image = image.clone()
+        
+        # Extract the region
+        original_region = patched_image[:, :, y:y+patch_h, x:x+patch_w]
+        patch_region = patch[:, :, :patch_h, :patch_w]
+        
+        # Apply mask: blend patch with original using circular mask
+        # mask is shape (H, W), need to broadcast for channels
+        mask_3d = trimmed_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+        blended = patch_region * mask_3d + original_region * (1 - mask_3d)
+        
+        patched_image[:, :, y:y+patch_h, x:x+patch_w] = blended
+        
+        return patched_image
+    
+    def attack(self, image, target_prompt):
+        """
+        Perform adversarial sticker attack
+        Args:
+            image: PIL Image
+            target_prompt: text prompt for detection (source class for targeted attack)
+        Returns:
+            adversarial_image: PIL Image with adversarial sticker
+            patch: the sticker/patch tensor
+            location: (x, y) coordinates of patch
+        """
+        # Preprocess image (transforms to square for SAM3)
+        original_tensor, original_size = self.preprocess_image(image)
+        
+        # Determine patch size (scale with SAM3's resolution)
+        _, _, img_h, img_w = original_tensor.shape
+        patch_size = min(self.patch_size, img_h // 4, img_w // 4)  # Max 1/4 of image
+        
+        # Create circular mask for the patch
+        circular_mask = self.create_circular_mask(patch_size, self.device)
+        print(f"  Created circular sticker with diameter: {patch_size} pixels")
+        print(f"  Working in SAM3 space: {img_w}x{img_h}, Original: {original_size[0]}x{original_size[1]}")
+        
+        # Get patch location in SAM3 space
+        patch_x, patch_y = self.get_patch_location(original_tensor.shape, patch_size)
+        print(f"  Sticker location: ({patch_x}, {patch_y})")
+        
+        # Initialize patch in tanh space for unconstrained optimization
+        patch_shape = (1, 3, patch_size, patch_size)
+        w = torch.zeros(patch_shape, requires_grad=True, device=self.device)
+        optimizer = torch.optim.Adam([w], lr=self.learning_rate)
+        
+        if self.target_class:
+            print(f"  Running TARGETED Adversarial Sticker attack with {self.iterations} iterations...")
+            print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
+        else:
+            print(f"  Running Adversarial Sticker attack with {self.iterations} iterations...")
+        
+        best_patch = None
+        best_loss = float('inf')
+        
+        for i in range(self.iterations):
+            # Convert patch from tanh space to valid pixel range
+            patch = 0.5 * (torch.tanh(w) + 1)
+            patch = (patch - 0.5) / 0.5  # Normalize to SAM3's expected range
+            
+            # Apply circular mask to patch (only optimize circular region)
+            mask_3d = circular_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+            masked_patch = patch * mask_3d
+            
+            # Apply patch to SAM3-transformed image
+            patched_image = self.apply_patch(original_tensor, masked_patch, patch_x, patch_y, circular_mask)
+            
+            # Compute detection loss
+            if self.target_class:
+                detection_loss, _, _ = self.compute_targeted_loss(
+                    patched_image, target_prompt, self.target_class
+                )
+            else:
+                detection_loss, _ = self.compute_loss(patched_image, target_prompt)
+            
+            # Patch regularization (encourage small, smooth patches)
+            # Only regularize within the circular region
+            patch_norm = torch.norm(masked_patch)
+            
+            # Total variation loss for smoothness
+            tv_loss = (torch.sum(torch.abs(patch[:, :, :, :-1] - patch[:, :, :, 1:])) +
+                      torch.sum(torch.abs(patch[:, :, :-1, :] - patch[:, :, 1:, :])))
+            
+            # Combined loss
+            total_loss = self.c * detection_loss + 0.01 * patch_norm + 0.001 * tv_loss
+            
+            # Optimization step
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+            
+            # Track best patch
+            if total_loss.item() < best_loss:
+                best_loss = total_loss.item()
+                best_patch = masked_patch.detach().clone()
+            
+            if (i + 1) % 40 == 0:
+                if self.target_class:
+                    with torch.no_grad():
+                        _, src_out, tgt_out = self.compute_targeted_loss(
+                            patched_image, target_prompt, self.target_class
+                        )
+                        src_conf = src_out["pred_logits"].sigmoid().max().item()
+                        tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
+                        print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}, "
+                              f"SrcMax: {src_conf:.4f}, TgtMax: {tgt_conf:.4f}")
+                else:
+                    print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}, "
+                          f"Detection: {detection_loss.item():.4f}")
+        
+        # Use best patch found
+        if best_patch is not None:
+            final_patched = self.apply_patch(original_tensor, best_patch, patch_x, patch_y, circular_mask)
+        else:
+            final_patched = patched_image
+        
+        # For the adversarial result, save it at SAM3's resolution first
+        # This ensures the sticker stays in the exact right location when tested
+        adversarial_image_sam3 = self.tensor_to_pil(final_patched, None)
+        
+        # Also create a version at original resolution for visualization
+        adversarial_image_display = self.tensor_to_pil(final_patched, original_size)
+        
+        # Create visualization of the circular sticker with transparency
+        # Convert patch to [0, 1] range
+        patch_to_save = best_patch if best_patch is not None else masked_patch
+        patch_01 = (patch_to_save.squeeze(0) * 0.5 + 0.5).clamp(0, 1).cpu()
+        
+        # Create RGBA image with alpha channel based on circular mask
+        patch_rgba = torch.zeros(4, patch_size, patch_size)
+        patch_rgba[:3, :, :] = patch_01
+        patch_rgba[3, :, :] = circular_mask.cpu()  # Alpha channel
+        
+        # Convert to PIL Image with transparency
+        patch_rgba_np = (patch_rgba.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+        patch_pil = Image.fromarray(patch_rgba_np, mode='RGBA')
+        
+        # Return both SAM3-resolution version (for testing) and display version (for saving)
+        return adversarial_image_sam3, adversarial_image_display, patch_pil, (patch_x, patch_y), best_loss
+
+
+def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, target_class=None, 
+                           stealthy=False, patch_size=150, patch_location='center'):
     """Test adversarial attack on a single image"""
     
     # Create subfolder for this animal
@@ -304,13 +682,18 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir):
     print(f"\n{'='*70}")
     print(f"Processing: {animal_name} ({image_path})")
     print(f"Attack: {attack_method}")
+    if target_class:
+        print(f"Target Class: {target_class} (TARGETED ATTACK)")
     print(f"Output folder: {animal_output_dir}")
     print('='*70)
     
     # Load model
     print("Loading SAM3 model...")
     model = build_sam3_image_model()
-    processor = Sam3Processor(model, confidence_threshold=0.1)
+    # Use higher confidence threshold to filter out weak detections
+    confidence_thresh = 0.5 if target_class else 0.1
+    processor = Sam3Processor(model, confidence_threshold=confidence_thresh)
+    print(f"Using confidence threshold: {confidence_thresh}")
     
     # Load image
     try:
@@ -350,18 +733,56 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir):
     elif attack_method.lower() in ['pgd', 'pgm']:
         attacker = PGD(model, processor, epsilon=0.03, alpha=0.01, iterations=10)
     elif attack_method.lower() == 'cw':
-        attacker = CW(model, processor, c=1.0, iterations=100, learning_rate=0.01)
+        # Use stronger parameters for targeted attacks
+        c_param = 10.0 if target_class else 1.0
+        lr_param = 0.05 if target_class else 0.01
+        # Perceptual parameters: higher values = more imperceptible but potentially less effective
+        if stealthy:
+            perceptual_w = 0.5   # Higher weight for very imperceptible perturbations
+            frequency_w = 0.3    # Strong smoothness constraint
+        else:
+            perceptual_w = 0.2   # Weight for perceptual loss
+            frequency_w = 0.1    # Weight for frequency smoothness
+        attacker = CW(model, processor, c=c_param, iterations=100, learning_rate=lr_param, 
+                     target_class=target_class, perceptual_weight=perceptual_w, 
+                     frequency_weight=frequency_w)
+    elif attack_method.lower() == 'sticker':
+        # Adversarial sticker/patch attack
+        attacker = AdversarialSticker(model, processor, patch_size=patch_size, location=patch_location,
+                                     c=10.0, iterations=200, learning_rate=0.1, 
+                                     target_class=target_class)
     else:
         print(f"Unknown attack method: {attack_method}")
         return
     
-    # Perform attack
-    adversarial_image, perturbation, loss_value = attacker.attack(original_image, animal_name)
-    print(f"Attack completed. Loss: {loss_value:.4f}")
+    # Perform attack (different return values for sticker vs others)
+    if attack_method.lower() == 'sticker':
+        adversarial_image_test, adversarial_image_display, patch_image, patch_location, loss_value = attacker.attack(original_image, animal_name)
+        print(f"Attack completed. Loss: {loss_value:.4f}")
+        print(f"Patch location: {patch_location}")
+        
+        # Save patch separately with appropriate naming
+        if target_class:
+            patch_filename = f"sticker_{target_class}.png"
+        else:
+            patch_filename = f"sticker_{animal_name}.png"
+        
+        patch_path = f"{animal_output_dir}/{patch_filename}"
+        patch_image.save(patch_path)
+        print(f"Saved sticker to: {patch_path}")
+        
+        # Use test version for evaluation, display version for saving
+        adversarial_image = adversarial_image_test
+        adversarial_image_tosave = adversarial_image_display
+        perturbation = None  # No full perturbation for sticker
+    else:
+        adversarial_image, perturbation, loss_value = attacker.attack(original_image, animal_name)
+        adversarial_image_tosave = adversarial_image
+        print(f"Attack completed. Loss: {loss_value:.4f}")
     
-    # Save adversarial image
+    # Save adversarial image (use display version for sticker)
     adv_image_path = f"{animal_output_dir}/{animal_name}_adversarial_{attack_method}.png"
-    adversarial_image.save(adv_image_path)
+    adversarial_image_tosave.save(adv_image_path)
     print(f"Saved adversarial image to: {adv_image_path}")
     
     # Test adversarial image
@@ -386,31 +807,72 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir):
     plt.savefig(adv_output_path, bbox_inches='tight', dpi=150)
     plt.close()
     
-    # Visualize perturbation
-    perturbation_np = perturbation.squeeze(0).permute(1, 2, 0).cpu().detach().numpy()
-    perturbation_vis = np.abs(perturbation_np)
-    perturbation_vis = (perturbation_vis - perturbation_vis.min()) / (perturbation_vis.max() - perturbation_vis.min() + 1e-8)
+    # If targeted attack, also test for target class detection
+    if target_class:
+        print(f"\n--- Testing for Target Class '{target_class}' ---")
+        processor.reset_all_prompts(inference_state_adv)
+        output_target = processor.set_text_prompt(state=inference_state_adv, prompt=target_class)
+        
+        boxes_target = output_target["boxes"]
+        scores_target = output_target["scores"]
+        
+        if boxes_target is not None and len(scores_target) > 0:
+            print(f"Adversarial: Detected {len(boxes_target)} {target_class}(s)")
+            for idx, (box, score) in enumerate(zip(boxes_target, scores_target)):
+                print(f"  {target_class} #{idx+1}: score={score.item():.4f}")
+        else:
+            print(f"Adversarial: No {target_class} detected.")
+        
+        # Plot and save target class result
+        plot_results(adversarial_image, inference_state_adv)
+        target_output_path = f"{animal_output_dir}/{animal_name}_adversarial_{attack_method}_target_{target_class}.png"
+        plt.savefig(target_output_path, bbox_inches='tight', dpi=150)
+        plt.close()
+        print(f"Saved target class detection to: {target_output_path}")
     
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 3, 1)
-    plt.imshow(original_image)
-    plt.title('Original')
-    plt.axis('off')
-    
-    plt.subplot(1, 3, 2)
-    plt.imshow(perturbation_vis)
-    plt.title(f'Perturbation ({attack_method.upper()})')
-    plt.axis('off')
-    
-    plt.subplot(1, 3, 3)
-    plt.imshow(adversarial_image)
-    plt.title('Adversarial')
-    plt.axis('off')
-    
-    comparison_path = f"{animal_output_dir}/{animal_name}_{attack_method}_comparison.png"
-    plt.savefig(comparison_path, bbox_inches='tight', dpi=150)
-    plt.close()
-    print(f"Saved comparison to: {comparison_path}")
+    # Visualize perturbation (skip for sticker attacks as we saved the patch separately)
+    if perturbation is not None:
+        perturbation_np = perturbation.squeeze(0).permute(1, 2, 0).cpu().detach().numpy()
+        perturbation_vis = np.abs(perturbation_np)
+        perturbation_vis = (perturbation_vis - perturbation_vis.min()) / (perturbation_vis.max() - perturbation_vis.min() + 1e-8)
+        
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 3, 1)
+        plt.imshow(original_image)
+        plt.title('Original')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 2)
+        plt.imshow(perturbation_vis)
+        plt.title(f'Perturbation ({attack_method.upper()})')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 3)
+        plt.imshow(adversarial_image_tosave)
+        plt.title('Adversarial')
+        plt.axis('off')
+        
+        comparison_path = f"{animal_output_dir}/{animal_name}_{attack_method}_comparison.png"
+        plt.savefig(comparison_path, bbox_inches='tight', dpi=150)
+        plt.close()
+        print(f"Saved comparison to: {comparison_path}")
+    else:
+        # For sticker attack, show original vs adversarial side by side
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(original_image)
+        plt.title('Original')
+        plt.axis('off')
+        
+        plt.subplot(1, 2, 2)
+        plt.imshow(adversarial_image_tosave)
+        plt.title('With Adversarial Sticker')
+        plt.axis('off')
+        
+        comparison_path = f"{animal_output_dir}/{animal_name}_{attack_method}_comparison.png"
+        plt.savefig(comparison_path, bbox_inches='tight', dpi=150)
+        plt.close()
+        print(f"Saved comparison to: {comparison_path}")
     
     # Print summary
     print("\n--- Attack Summary ---")
@@ -421,40 +883,67 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir):
     if scores_adv is not None and len(scores_adv) > 0:
         print(f"Adversarial max confidence: {scores_adv.max().item():.4f}")
     
-    attack_success = (scores_orig is not None and len(scores_orig) > 0 and 
-                     (scores_adv is None or len(scores_adv) == 0 or 
-                      scores_adv.max().item() < scores_orig.max().item() * 0.5))
+    if target_class:
+        # Targeted attack success: source class suppressed AND target class detected
+        source_suppressed = (scores_adv is None or len(scores_adv) == 0 or 
+                           scores_adv.max().item() < 0.3)
+        target_detected = (boxes_target is not None and len(boxes_target) > 0 and 
+                          scores_target.max().item() > 0.3)
+        attack_success = source_suppressed and target_detected
+        print(f"Source class suppressed: {source_suppressed}")
+        print(f"Target class detected: {target_detected}")
+    else:
+        # Untargeted attack success: just suppress detections
+        attack_success = (scores_orig is not None and len(scores_orig) > 0 and 
+                         (scores_adv is None or len(scores_adv) == 0 or 
+                          scores_adv.max().item() < scores_orig.max().item() * 0.5))
     print(f"Attack successful: {attack_success}")
 
 
 def main():
     parser = argparse.ArgumentParser(description='SAM3 Adversarial Attack Framework')
     parser.add_argument('--attack', type=str, default='fgsm', 
-                       choices=['fgsm', 'pgd', 'pgm', 'cw'],
-                       help='Attack method: fgsm, pgd/pgm, or cw')
+                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker'],
+                       help='Attack method: fgsm, pgd/pgm, cw, or sticker')
     parser.add_argument('--image', type=str, default='data/cat.jpg',
                        help='Path to input image')
     parser.add_argument('--prompt', type=str, default='cat',
-                       help='Text prompt for detection')
+                       help='Text prompt for detection (source class)')
+    parser.add_argument('--target', type=str, default=None,
+                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with C&W and sticker attacks.')
     parser.add_argument('--output-dir', type=str, default='adversarial_results',
                        help='Output directory for results')
     parser.add_argument('--epsilon', type=float, default=0.03,
                        help='Perturbation budget for FGSM/PGD')
     parser.add_argument('--iterations', type=int, default=10,
                        help='Number of iterations for PGD/CW')
+    parser.add_argument('--stealthy', action='store_true',
+                       help='Use higher perceptual weights for less visible perturbations (C&W only)')
+    parser.add_argument('--patch-size', type=int, default=150,
+                       help='Size of adversarial sticker/patch (sticker attack only)')
+    parser.add_argument('--patch-location', type=str, default='center',
+                       choices=['center', 'random', 'top-left', 'top-right', 'bottom-left', 'bottom-right'],
+                       help='Location to place adversarial sticker (sticker attack only)')
     
     args = parser.parse_args()
+    
+    # Validate targeted attack
+    if args.target and args.attack not in ['cw', 'sticker']:
+        print(f"WARNING: Targeted attacks (--target) only supported for C&W and sticker attacks. Ignoring target.")
+        args.target = None
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Run attack
-    test_adversarial_attack(args.attack, args.image, args.prompt, args.output_dir)
+    test_adversarial_attack(args.attack, args.image, args.prompt, args.output_dir, 
+                           args.target, args.stealthy, args.patch_size, args.patch_location)
     
     print(f"\n{'='*70}")
     print(f"All results saved in '{args.output_dir}/{args.prompt}/' folder")
     print('='*70)
 
+#TODO: Boost the pertubation signal in FGSM 
 
 if __name__ == "__main__":
     main()
