@@ -461,7 +461,7 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
 
 
 def visualize_results(original_img, adversarial_img, original_preds, adv_preds, 
-                     attack_name, output_name, perturbation=None):
+                     attack_name, output_name, perturbation=None, amplify_factor=1.0):
     """Visualize attack results"""
     fig, axes = plt.subplots(1, 3 if perturbation is not None else 2, 
                             figsize=(15 if perturbation is not None else 10, 5))
@@ -483,11 +483,26 @@ def visualize_results(original_img, adversarial_img, original_preds, adv_preds,
     # Perturbation
     if perturbation is not None:
         pert_np = perturbation.squeeze().cpu().detach().numpy()
-        # Visualize perturbation (amplified for visibility)
         pert_vis = np.transpose(pert_np, (1, 2, 0))
-        pert_vis = (pert_vis - pert_vis.min()) / (pert_vis.max() - pert_vis.min() + 1e-8)
+        
+        if amplify_factor == 1.0:
+            # No amplification - show raw perturbation
+            # Shift from normalized space to [0, 1] for display
+            pert_vis = np.clip((pert_vis * 0.5) + 0.5, 0, 1)
+            title_suffix = "(raw, no amplification)"
+        else:
+            # Apply amplification factor
+            if amplify_factor < 0:
+                # Auto-scale to full range
+                pert_vis = (pert_vis - pert_vis.min()) / (pert_vis.max() - pert_vis.min() + 1e-8)
+                title_suffix = "(auto-scaled)"
+            else:
+                # Manual amplification
+                pert_vis = np.clip((pert_vis * amplify_factor) + 0.5, 0, 1)
+                title_suffix = f"(amplified {amplify_factor}x)"
+        
         axes[2].imshow(pert_vis)
-        axes[2].set_title("Perturbation\n(amplified for visibility)", fontsize=12)
+        axes[2].set_title(f"Perturbation\n{title_suffix}", fontsize=12)
         axes[2].axis('off')
     
     plt.suptitle(f"{attack_name} Attack Results", fontsize=16, fontweight='bold')
@@ -517,6 +532,9 @@ def main():
     parser.add_argument('--patch-location', type=str, default='center',
                        choices=['center', 'top-left', 'top-right', 'bottom-left', 'bottom-right'],
                        help='Sticker location')
+    parser.add_argument('--amplify-perturbation', type=float, default=1.0,
+                       help='Amplification factor for perturbation visualization '
+                            '(1.0=no amplification, -1=auto-scale, >1=amplify by factor)')
     
     args = parser.parse_args()
     
@@ -629,7 +647,8 @@ def main():
                            f"{image_name}_{args.attack}_comparison.png")
     visualize_results(original_image, adversarial_image, 
                      original_preds, adv_preds, 
-                     args.attack.upper(), viz_path, perturbation)
+                     args.attack.upper(), viz_path, perturbation,
+                     amplify_factor=args.amplify_perturbation)
     
     # Summary
     print(f"\n{'=' * 60}")
