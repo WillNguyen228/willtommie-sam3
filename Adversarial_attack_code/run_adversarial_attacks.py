@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import os
 import argparse
 import numpy as np
+import gc
 
 
 class AdversarialAttacker:
@@ -212,6 +213,10 @@ class FGSM(AdversarialAttacker):
         # Get gradient
         gradient = image_tensor.grad.data
         
+        # Clear gradients to free memory
+        image_tensor.grad = None
+        torch.cuda.empty_cache()
+        
         # Create perturbation: epsilon * sign(gradient)
         # For untargeted attack, we want to go in direction of gradient to maximize loss
         perturbation = self.epsilon * gradient.sign()
@@ -262,6 +267,10 @@ class PGD(AdversarialAttacker):
             
             # Get gradient
             gradient = perturbed_tensor.grad.data
+            
+            # Clear gradients to free memory
+            perturbed_tensor.grad = None
+            torch.cuda.empty_cache()
             
             # Update perturbation
             with torch.no_grad():
@@ -414,6 +423,10 @@ class CW(AdversarialAttacker):
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
+            
+            # Periodic memory cleanup
+            if (i + 1) % 10 == 0:
+                torch.cuda.empty_cache()
             
             # Track best perturbation
             if total_loss.item() < best_loss:
@@ -621,6 +634,10 @@ class AdversarialSticker(AdversarialAttacker):
             total_loss.backward()
             optimizer.step()
             
+            # Periodic memory cleanup
+            if (i + 1) % 20 == 0:
+                torch.cuda.empty_cache()
+            
             # Track best patch
             if total_loss.item() < best_loss:
                 best_loss = total_loss.item()
@@ -672,7 +689,7 @@ class AdversarialSticker(AdversarialAttacker):
 
 
 def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, target_class=None, 
-                           stealthy=False, patch_size=150, patch_location='center'):
+                           stealthy=False, patch_size=150, patch_location='center', max_size=None):
     """Test adversarial attack on a single image"""
     
     # Create subfolder for this animal
@@ -699,6 +716,18 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
     try:
         original_image = Image.open(image_path).convert('RGB')
         print(f"Image size: {original_image.size[0]}x{original_image.size[1]}")
+        
+        # Downsample very large images to prevent OOM during gradient computation (only if max_size is set)
+        if max_size is not None:
+            width, height = original_image.size
+            if max(width, height) > max_size:
+                scale = max_size / max(width, height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                print(f"Downsampling to {new_width}x{new_height} (--max-size={max_size})")
+                original_image = original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                print(f"Downsampled image size: {original_image.size[0]}x{original_image.size[1]}")
+        
     except Exception as e:
         print(f"Error loading {image_path}: {e}")
         return
@@ -898,13 +927,19 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
                          (scores_adv is None or len(scores_adv) == 0 or 
                           scores_adv.max().item() < scores_orig.max().item() * 0.5))
     print(f"Attack successful: {attack_success}")
+    
+    # Clean up GPU memory after attack
+    del model
+    del processor
+    torch.cuda.empty_cache()
+    gc.collect()
 
 
 def main():
     parser = argparse.ArgumentParser(description='SAM3 Adversarial Attack Framework')
-    parser.add_argument('--attack', type=str, default='fgsm', 
-                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker'],
-                       help='Attack method: fgsm, pgd/pgm, cw, or sticker')
+    parser.add_argument('--attack', type=str, default='all', 
+                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker', 'all'],
+                       help='Attack method: fgsm, pgd/pgm, cw, sticker, or all (default: all)')
     parser.add_argument('--image', type=str, default='data/cat.jpg',
                        help='Path to input image')
     parser.add_argument('--prompt', type=str, default='cat',
@@ -924,20 +959,46 @@ def main():
     parser.add_argument('--patch-location', type=str, default='center',
                        choices=['center', 'random', 'top-left', 'top-right', 'bottom-left', 'bottom-right'],
                        help='Location to place adversarial sticker (sticker attack only)')
+    parser.add_argument('--max-size', type=int, default=None,
+                       help='Maximum image dimension (if set, images larger than this will be downsampled to prevent OOM errors)')
     
     args = parser.parse_args()
     
+    # Determine which attacks to run
+    if args.attack == 'all':
+        attacks_to_run = ['fgsm', 'pgd', 'cw', 'sticker']
+    else:
+        attacks_to_run = [args.attack]
+    
     # Validate targeted attack
-    if args.target and args.attack not in ['cw', 'sticker']:
-        print(f"WARNING: Targeted attacks (--target) only supported for C&W and sticker attacks. Ignoring target.")
-        args.target = None
+    if args.target:
+        for attack in attacks_to_run:
+            if attack not in ['cw', 'sticker']:
+                print(f"WARNING: Targeted attacks (--target) only supported for C&W and sticker attacks.")
+                print(f"         Will skip targeted mode for {attack.upper()}.")
+        # Filter to only attacks that support targeting
+        if args.attack == 'all':
+            attacks_to_run_with_target = ['cw', 'sticker']
+            attacks_to_run_without_target = [a for a in attacks_to_run if a not in attacks_to_run_with_target]
+        else:
+            attacks_to_run_with_target = [a for a in attacks_to_run if a in ['cw', 'sticker']]
+            attacks_to_run_without_target = [a for a in attacks_to_run if a not in ['cw', 'sticker']]
+    else:
+        attacks_to_run_with_target = []
+        attacks_to_run_without_target = attacks_to_run
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Run attack
-    test_adversarial_attack(args.attack, args.image, args.prompt, args.output_dir, 
-                           args.target, args.stealthy, args.patch_size, args.patch_location)
+    # Run attacks without targeting first
+    for attack_method in attacks_to_run_without_target:
+        test_adversarial_attack(attack_method, args.image, args.prompt, args.output_dir, 
+                               None, args.stealthy, args.patch_size, args.patch_location, args.max_size)
+    
+    # Run attacks with targeting
+    for attack_method in attacks_to_run_with_target:
+        test_adversarial_attack(attack_method, args.image, args.prompt, args.output_dir, 
+                               args.target, args.stealthy, args.patch_size, args.patch_location, args.max_size)
     
     print(f"\n{'='*70}")
     print(f"All results saved in '{args.output_dir}/{args.prompt}/' folder")
