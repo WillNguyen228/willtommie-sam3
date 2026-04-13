@@ -53,30 +53,13 @@ class ResNetAdversarialAttacker:
             raise ValueError("Image must be a PIL image")
     
     def compute_loss(self, image_tensor, target_class=None, source_class=None):
-        """
-        Compute loss for adversarial attack
-        
-        Args:
-            image_tensor: Normalized input tensor
-            target_class: If provided, targeted attack (maximize this class)
-            source_class: Original class (for untargeted, minimize this)
-        
-        Returns:
-            loss: Scalar loss value
-            logits: Model output logits
-        """
         logits = self.model(image_tensor)
         
         if target_class is not None:
-            # TARGETED attack: maximize probability of target class
-            # Negative because we'll use gradient descent to minimize loss
             loss = -logits[0, target_class]
         elif source_class is not None:
-            # UNTARGETED attack: minimize probability of source class
-            # Negative so gradient ascent reduces source class confidence
             loss = -logits[0, source_class]
         else:
-            # UNTARGETED attack: minimize max class probability
             probs = F.softmax(logits, dim=1)
             top_prob = probs.max()
             loss = -top_prob
@@ -85,20 +68,16 @@ class ResNetAdversarialAttacker:
     
     def tensor_to_pil(self, tensor, original_size=None):
         """Convert normalized tensor back to PIL image"""
-        # Denormalize
         tensor = tensor.squeeze(0)
-        # Need to reshape mean and std to (3, 1, 1) for broadcasting
         mean = self.mean.squeeze(0).view(3, 1, 1)
         std = self.std.squeeze(0).view(3, 1, 1)
         tensor = tensor * std + mean
         tensor = torch.clamp(tensor, 0, 1)
         
-        # Convert to PIL
         tensor = tensor.cpu()
         image_np = (tensor.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
         pil_image = Image.fromarray(image_np)
         
-        # Resize back to original size if specified
         if original_size is not None:
             pil_image = pil_image.resize(original_size, Image.Resampling.LANCZOS)
         
@@ -110,7 +89,6 @@ class ResNetAdversarialAttacker:
             logits = self.model(image_tensor)
             probs = F.softmax(logits, dim=1)
             
-            # Get top-5 predictions
             top5_probs, top5_indices = torch.topk(probs, 5, dim=1)
             
             results = []
@@ -132,44 +110,21 @@ class FGSM_ResNet(ResNetAdversarialAttacker):
         self.epsilon = epsilon
         
     def attack(self, image, source_class=None, target_class=None):
-        """
-        Perform FGSM attack
-        
-        Args:
-            image: PIL Image
-            source_class: Index of true class (for untargeted attack)
-            target_class: Index of target class (for targeted attack)
-        
-        Returns:
-            adversarial_image: PIL Image with perturbation
-            perturbation: The actual perturbation added
-            loss: Final loss value
-        """
-        # Preprocess
         normalized_tensor, original_tensor, original_size = self.preprocess_image(image)
         normalized_tensor.requires_grad = True
         
-        # Compute loss
         loss, _ = self.compute_loss(normalized_tensor, target_class, source_class)
         
-        # Backward
         self.model.zero_grad()
         loss.backward()
         
-        # Get gradient
         gradient = normalized_tensor.grad.data
-        
-        # Create perturbation
         perturbation = self.epsilon * gradient.sign()
-        
-        # Apply perturbation in normalized space
         perturbed_normalized = normalized_tensor.detach() + perturbation
         
-        # Convert back to [0, 1] space
         perturbed_01 = perturbed_normalized * self.std + self.mean
         perturbed_01 = torch.clamp(perturbed_01, 0, 1)
         
-        # Convert to PIL and resize to original dimensions
         adversarial_image = self.tensor_to_pil(perturbed_normalized, original_size)
         
         return adversarial_image, perturbation, loss.item()
@@ -185,8 +140,6 @@ class PGD_ResNet(ResNetAdversarialAttacker):
         self.iterations = iterations
         
     def attack(self, image, source_class=None, target_class=None):
-        """Perform PGD attack"""
-        # Preprocess
         original_normalized, original_01, original_size = self.preprocess_image(image)
         perturbed = original_normalized.clone().detach()
         
@@ -195,22 +148,16 @@ class PGD_ResNet(ResNetAdversarialAttacker):
         for i in range(self.iterations):
             perturbed.requires_grad = True
             
-            # Compute loss
             loss, _ = self.compute_loss(perturbed, target_class, source_class)
             
-            # Backward
             self.model.zero_grad()
             loss.backward()
             
-            # Get gradient
             gradient = perturbed.grad.data
             
-            # Update
             with torch.no_grad():
-                # Step in gradient direction
                 perturbed = perturbed.detach() + self.alpha * gradient.sign()
                 
-                # Project to epsilon ball
                 perturbation = torch.clamp(
                     perturbed - original_normalized,
                     -self.epsilon,
@@ -221,7 +168,6 @@ class PGD_ResNet(ResNetAdversarialAttacker):
             if (i + 1) % 2 == 0:
                 print(f"    Iteration {i+1}/{self.iterations}, Loss: {loss.item():.4f}")
         
-        # Convert to PIL and resize to original dimensions
         adversarial_image = self.tensor_to_pil(perturbed, original_size)
         final_perturbation = perturbed - original_normalized
         
@@ -239,11 +185,8 @@ class CW_ResNet(ResNetAdversarialAttacker):
         self.learning_rate = learning_rate
     
     def attack(self, image, source_class=None, target_class=None):
-        """Perform C&W attack"""
-        # Preprocess
         original_normalized, original_01, original_size = self.preprocess_image(image)
         
-        # Initialize perturbation in tanh space
         w = torch.zeros_like(original_normalized, requires_grad=True, device=self.device)
         optimizer = torch.optim.Adam([w], lr=self.learning_rate)
         
@@ -253,49 +196,34 @@ class CW_ResNet(ResNetAdversarialAttacker):
         best_loss = float('inf')
         
         for i in range(self.iterations):
-            # Convert from tanh space
-            # tanh(w) is in [-1, 1], so 0.5*(tanh(w)+1) is in [0, 1]
             perturbed_01 = 0.5 * (torch.tanh(w) + 1)
-            
-            # Normalize for model
             perturbed_normalized = (perturbed_01 - self.mean) / self.std
             
-            # Compute classification loss
             if target_class is not None:
-                # Targeted: maximize target class logit
                 logits = self.model(perturbed_normalized)
-                # We want to maximize target_logit - max(other_logits)
                 target_logit = logits[0, target_class]
                 other_logits = torch.cat([logits[0, :target_class], 
                                          logits[0, target_class+1:]])
                 max_other = other_logits.max()
                 classification_loss = torch.clamp(max_other - target_logit, min=0)
             elif source_class is not None:
-                # Untargeted: minimize source class confidence
                 logits = self.model(perturbed_normalized)
                 source_logit = logits[0, source_class]
                 other_logits = torch.cat([logits[0, :source_class], 
                                          logits[0, source_class+1:]])
                 max_other = other_logits.max()
-                # Want source to be less than other classes
                 classification_loss = torch.clamp(source_logit - max_other, min=-10)
             else:
-                # Generic untargeted
                 classification_loss, _ = self.compute_loss(perturbed_normalized, 
                                                           target_class, source_class)
             
-            # L2 distance penalty
             l2_dist = torch.norm(perturbed_01 - original_01)
-            
-            # Combined loss
             total_loss = l2_dist + self.c * classification_loss
             
-            # Optimize
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
             
-            # Track best
             if total_loss.item() < best_loss:
                 best_loss = total_loss.item()
                 best_perturbation = perturbed_normalized.detach().clone()
@@ -304,7 +232,6 @@ class CW_ResNet(ResNetAdversarialAttacker):
                 print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}, "
                       f"L2: {l2_dist.item():.4f}")
         
-        # Use best perturbation and resize to original dimensions
         if best_perturbation is not None:
             adversarial_image = self.tensor_to_pil(best_perturbation, original_size)
             final_perturbation = best_perturbation - original_normalized
@@ -328,7 +255,6 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
         self.learning_rate = learning_rate
     
     def create_circular_mask(self, size, device):
-        """Create circular mask for sticker"""
         y, x = torch.meshgrid(torch.arange(size, device=device),
                              torch.arange(size, device=device), indexing='ij')
         center = size / 2.0
@@ -339,7 +265,6 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
         return mask
     
     def get_patch_location(self, image_shape, patch_size):
-        """Determine patch location"""
         _, _, h, w = image_shape
         
         if self.location == 'center':
@@ -360,21 +285,14 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
         return x, y
     
     def attack(self, image, source_class=None, target_class=None):
-        """Perform adversarial sticker attack"""
-        # Preprocess
         original_normalized, original_01, original_size = self.preprocess_image(image)
         
-        # Create circular mask
         circular_mask = self.create_circular_mask(self.patch_size, self.device)
-        
-        # Get patch location
         x, y = self.get_patch_location(original_01.shape, self.patch_size)
         
-        # Create full mask
         full_mask = torch.zeros_like(original_01)
         full_mask[:, :, y:y+self.patch_size, x:x+self.patch_size] = circular_mask.unsqueeze(0).unsqueeze(0)
         
-        # Initialize patch in tanh space
         patch = torch.zeros(1, 3, self.patch_size, self.patch_size, 
                            device=self.device, requires_grad=True)
         optimizer = torch.optim.Adam([patch], lr=self.learning_rate)
@@ -386,10 +304,8 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
         best_loss = float('inf')
         
         for i in range(self.iterations):
-            # Convert patch from tanh space to [0, 1]
             patch_01 = 0.5 * (torch.tanh(patch) + 1)
             
-            # Apply patch to image
             perturbed_01 = original_01.clone()
             patch_region = perturbed_01[:, :, y:y+self.patch_size, x:x+self.patch_size]
             patch_mask = circular_mask.unsqueeze(0).unsqueeze(0)
@@ -397,10 +313,8 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
                 patch_01 * patch_mask + patch_region * (1 - patch_mask)
             )
             
-            # Normalize for model
             perturbed_normalized = (perturbed_01 - self.mean) / self.std
             
-            # Compute classification loss
             if target_class is not None:
                 logits = self.model(perturbed_normalized)
                 target_logit = logits[0, target_class]
@@ -419,20 +333,16 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
                 classification_loss, _ = self.compute_loss(perturbed_normalized,
                                                           target_class, source_class)
             
-            # Patch smoothness penalty
             dx = torch.abs(patch[:, :, :, 1:] - patch[:, :, :, :-1])
             dy = torch.abs(patch[:, :, 1:, :] - patch[:, :, :-1, :])
             smoothness_loss = dx.mean() + dy.mean()
             
-            # Combined loss
             total_loss = self.c * classification_loss + 0.01 * smoothness_loss
             
-            # Optimize
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
             
-            # Track best
             if total_loss.item() < best_loss:
                 best_loss = total_loss.item()
                 best_patch = patch_01.detach().clone()
@@ -440,7 +350,6 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
             if (i + 1) % 40 == 0:
                 print(f"    Iteration {i+1}/{self.iterations}, Loss: {total_loss.item():.4f}")
         
-        # Apply best patch and resize to original dimensions
         if best_patch is not None:
             final_01 = original_01.clone()
             patch_region = final_01[:, :, y:y+self.patch_size, x:x+self.patch_size]
@@ -450,8 +359,6 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
             )
             final_normalized = (final_01 - self.mean) / self.std
             adversarial_image = self.tensor_to_pil(final_normalized, original_size)
-            
-            # Also save just the sticker
             sticker_image = self.tensor_to_pil((best_patch - self.mean) / self.std)
         else:
             adversarial_image = self.tensor_to_pil(perturbed_normalized, original_size)
@@ -466,38 +373,30 @@ def visualize_results(original_img, adversarial_img, original_preds, adv_preds,
     fig, axes = plt.subplots(1, 3 if perturbation is not None else 2, 
                             figsize=(15 if perturbation is not None else 10, 5))
     
-    # Original image
     axes[0].imshow(original_img)
     axes[0].set_title(f"Original\n{original_preds[0]['class']}\n"
                      f"{original_preds[0]['confidence']*100:.1f}% confidence",
                      fontsize=12)
     axes[0].axis('off')
     
-    # Adversarial image
     axes[1].imshow(adversarial_img)
     axes[1].set_title(f"After {attack_name}\n{adv_preds[0]['class']}\n"
                      f"{adv_preds[0]['confidence']*100:.1f}% confidence",
                      fontsize=12)
     axes[1].axis('off')
     
-    # Perturbation
     if perturbation is not None:
         pert_np = perturbation.squeeze().cpu().detach().numpy()
         pert_vis = np.transpose(pert_np, (1, 2, 0))
         
         if amplify_factor == 1.0:
-            # No amplification - show raw perturbation
-            # Shift from normalized space to [0, 1] for display
             pert_vis = np.clip((pert_vis * 0.5) + 0.5, 0, 1)
             title_suffix = "(raw, no amplification)"
         else:
-            # Apply amplification factor
             if amplify_factor < 0:
-                # Auto-scale to full range
                 pert_vis = (pert_vis - pert_vis.min()) / (pert_vis.max() - pert_vis.min() + 1e-8)
                 title_suffix = "(auto-scaled)"
             else:
-                # Manual amplification
                 pert_vis = np.clip((pert_vis * amplify_factor) + 0.5, 0, 1)
                 title_suffix = f"(amplified {amplify_factor}x)"
         
@@ -512,11 +411,88 @@ def visualize_results(original_img, adversarial_img, original_preds, adv_preds,
     plt.close()
 
 
+def run_attack(attack_name, model, device, args, original_image, source_class,
+               target_class_idx, original_preds, output_dir, image_name):
+    """Run a single attack and save its results. Returns a summary dict."""
+    print(f"\n{'=' * 60}")
+    print(f"Running {attack_name.upper()} Attack")
+    print(f"{'=' * 60}")
+
+    if attack_name == 'fgsm':
+        attacker = FGSM_ResNet(model, epsilon=args.epsilon, device=device)
+        adversarial_image, perturbation, loss = attacker.attack(
+            original_image, source_class, target_class_idx
+        )
+
+    elif attack_name == 'pgd':
+        attacker = PGD_ResNet(model, epsilon=args.epsilon,
+                              iterations=args.iterations or 10, device=device)
+        adversarial_image, perturbation, loss = attacker.attack(
+            original_image, source_class, target_class_idx
+        )
+
+    elif attack_name == 'cw':
+        attacker = CW_ResNet(model, iterations=args.iterations or 100, device=device)
+        adversarial_image, perturbation, loss = attacker.attack(
+            original_image, source_class, target_class_idx
+        )
+
+    elif attack_name == 'sticker':
+        attacker = AdversarialSticker_ResNet(
+            model, patch_size=args.patch_size, location=args.patch_location,
+            iterations=args.iterations or 200, device=device
+        )
+        adversarial_image, sticker_image, loss = attacker.attack(
+            original_image, source_class, target_class_idx
+        )
+        perturbation = None
+        if sticker_image:
+            sticker_path = os.path.join(output_dir, f"{image_name}_sticker_sticker.png")
+            sticker_image.save(sticker_path)
+            print(f"  Saved sticker: {sticker_path}")
+
+    # Get adversarial prediction
+    normalized_adv, _, _ = attacker.preprocess_image(adversarial_image)
+    adv_preds = attacker.get_prediction(normalized_adv)
+
+    print(f"\nAdversarial Classification ({attack_name.upper()}):")
+    print(f"  Top prediction: {adv_preds[0]['class']} "
+          f"({adv_preds[0]['confidence']*100:.1f}%)")
+    print(f"  Top-5:")
+    for i, pred in enumerate(adv_preds):
+        print(f"    {i+1}. {pred['class']}: {pred['confidence']*100:.1f}%")
+
+    # Save adversarial image
+    output_path = os.path.join(output_dir, f"{image_name}_adversarial_{attack_name}.png")
+    adversarial_image.save(output_path)
+    print(f"\n  Saved adversarial image: {output_path}")
+
+    # Save visualization
+    viz_path = os.path.join(output_dir, f"{image_name}_{attack_name}_comparison.png")
+    visualize_results(original_image, adversarial_image,
+                      original_preds, adv_preds,
+                      attack_name.upper(), viz_path, perturbation,
+                      amplify_factor=args.amplify_perturbation)
+
+    summary = {
+        'attack': attack_name,
+        'adv_class': adv_preds[0]['class'],
+        'adv_confidence': adv_preds[0]['confidence'],
+        'adv_index': adv_preds[0]['index'],
+        'loss': loss,
+    }
+
+    # Free attacker and any lingering tensors before the next attack
+    del attacker
+    if device == 'cuda':
+        torch.cuda.empty_cache()
+    print(f"  Memory cleared after {attack_name.upper()} attack.")
+
+    return summary
+
+
 def main():
     parser = argparse.ArgumentParser(description='Adversarial Attacks on ResNet-18')
-    parser.add_argument('--attack', type=str, required=True,
-                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker'],
-                       help='Attack method')
     parser.add_argument('--image', type=str, required=True,
                        help='Path to input image')
     parser.add_argument('--output-dir', type=str, default='resnet_adversarial_results',
@@ -535,24 +511,20 @@ def main():
     parser.add_argument('--amplify-perturbation', type=float, default=1.0,
                        help='Amplification factor for perturbation visualization '
                             '(1.0=no amplification, -1=auto-scale, >1=amplify by factor)')
-    
+
     args = parser.parse_args()
-    
-    # Map attack names
-    if args.attack == 'pgm':
-        args.attack = 'pgd'
-    
+
     print("=" * 60)
     print("RESNET-18 ADVERSARIAL ATTACK FRAMEWORK")
     print("=" * 60)
-    
+
     # Load model
     print("\nLoading ResNet-18...")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = resnet18(weights=ResNet18_Weights.DEFAULT).to(device)
     model.eval()
     print(f"Model loaded on {device}")
-    
+
     # Load image
     print(f"\nLoading image: {args.image}")
     try:
@@ -561,111 +533,68 @@ def main():
     except Exception as e:
         print(f"Error loading image: {e}")
         return
-    
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+
+    # Derive image name and create output directory scoped to that name
     image_name = os.path.splitext(os.path.basename(args.image))[0]
-    
-    # Get original prediction
+    output_dir = os.path.join(args.output_dir, image_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Get original prediction using a base attacker instance
+    base_attacker = ResNetAdversarialAttacker(model, device)
+    normalized, _, _ = base_attacker.preprocess_image(original_image)
+    original_preds = base_attacker.get_prediction(normalized)
+    source_class = original_preds[0]['index']
+
     print("\nOriginal Classification:")
-    if args.attack == 'fgsm':
-        attacker = FGSM_ResNet(model, epsilon=args.epsilon, device=device)
-    elif args.attack == 'pgd':
-        attacker = PGD_ResNet(model, epsilon=args.epsilon, 
-                             iterations=args.iterations or 10, device=device)
-    elif args.attack == 'cw':
-        attacker = CW_ResNet(model, iterations=args.iterations or 100, device=device)
-    elif args.attack == 'sticker':
-        attacker = AdversarialSticker_ResNet(model, patch_size=args.patch_size,
-                                            location=args.patch_location,
-                                            iterations=args.iterations or 200, 
-                                            device=device)
-    
-    normalized, _, _ = attacker.preprocess_image(original_image)
-    original_preds = attacker.get_prediction(normalized)
-    
     print(f"  Top prediction: {original_preds[0]['class']} "
           f"({original_preds[0]['confidence']*100:.1f}%)")
     print(f"  Top-5:")
     for i, pred in enumerate(original_preds):
         print(f"    {i+1}. {pred['class']}: {pred['confidence']*100:.1f}%")
-    
-    source_class = original_preds[0]['index']
-    
+
     # Handle target class
     target_class_idx = None
     if args.target_class:
-        # Find target class index
         try:
-            target_class_idx = attacker.categories.index(args.target_class)
+            target_class_idx = base_attacker.categories.index(args.target_class)
             print(f"\nTarget class: {args.target_class} (index {target_class_idx})")
         except ValueError:
             print(f"\nWarning: '{args.target_class}' not found in ImageNet classes")
-            print("Running untargeted attack instead")
-    
-    # Run attack
-    print(f"\n{'=' * 60}")
-    print(f"Running {args.attack.upper()} Attack")
-    print(f"{'=' * 60}")
-    
-    if args.attack == 'sticker':
-        adversarial_image, sticker_image, loss = attacker.attack(
-            original_image, source_class, target_class_idx
+            print("Running untargeted attacks instead")
+
+    # Free base attacker before running attacks
+    del base_attacker
+    if device == 'cuda':
+        torch.cuda.empty_cache()
+
+    # Run all attacks in sequence
+    all_attacks = ['fgsm', 'pgd', 'cw', 'sticker']
+    summaries = []
+
+    for attack_name in all_attacks:
+        summary = run_attack(
+            attack_name, model, device, args,
+            original_image, source_class, target_class_idx,
+            original_preds, output_dir, image_name
         )
-        perturbation = None
-        
-        # Save sticker separately
-        if sticker_image:
-            sticker_path = os.path.join(args.output_dir, 
-                                       f"{image_name}_sticker_{args.attack}.png")
-            sticker_image.save(sticker_path)
-            print(f"  Saved sticker: {sticker_path}")
-    else:
-        adversarial_image, perturbation, loss = attacker.attack(
-            original_image, source_class, target_class_idx
-        )
-    
-    # Get adversarial prediction
-    print("\nAdversarial Classification:")
-    normalized_adv, _, _ = attacker.preprocess_image(adversarial_image)
-    adv_preds = attacker.get_prediction(normalized_adv)
-    
-    print(f"  Top prediction: {adv_preds[0]['class']} "
-          f"({adv_preds[0]['confidence']*100:.1f}%)")
-    print(f"  Top-5:")
-    for i, pred in enumerate(adv_preds):
-        print(f"    {i+1}. {pred['class']}: {pred['confidence']*100:.1f}%")
-    
-    # Save results
-    output_path = os.path.join(args.output_dir, 
-                              f"{image_name}_adversarial_{args.attack}.png")
-    adversarial_image.save(output_path)
-    print(f"\nSaved adversarial image: {output_path}")
-    
-    # Visualize
-    viz_path = os.path.join(args.output_dir, 
-                           f"{image_name}_{args.attack}_comparison.png")
-    visualize_results(original_image, adversarial_image, 
-                     original_preds, adv_preds, 
-                     args.attack.upper(), viz_path, perturbation,
-                     amplify_factor=args.amplify_perturbation)
-    
-    # Summary
+        summaries.append(summary)
+
+    # Print combined summary table
     print(f"\n{'=' * 60}")
-    print("ATTACK SUMMARY")
+    print("OVERALL ATTACK SUMMARY")
     print(f"{'=' * 60}")
-    print(f"Original: {original_preds[0]['class']} ({original_preds[0]['confidence']*100:.1f}%)")
-    print(f"Adversarial: {adv_preds[0]['class']} ({adv_preds[0]['confidence']*100:.1f}%)")
-    
-    if original_preds[0]['index'] != adv_preds[0]['index']:
-        print("\n✓ ATTACK SUCCESSFUL - Classification changed!")
-    else:
-        conf_drop = original_preds[0]['confidence'] - adv_preds[0]['confidence']
-        print(f"\n• Confidence dropped by {conf_drop*100:.1f}%")
-    
-    if target_class_idx and adv_preds[0]['index'] == target_class_idx:
-        print(f"✓ TARGETED ATTACK SUCCESSFUL - Misclassified as '{args.target_class}'!")
-    
+    print(f"Original: {original_preds[0]['class']} ({original_preds[0]['confidence']*100:.1f}%)\n")
+
+    for s in summaries:
+        if target_class_idx is not None and s['adv_index'] == target_class_idx:
+            status = "✓ TARGETED SUCCESS"
+        elif s['adv_index'] != source_class:
+            status = "✓ CHANGED"
+        else:
+            status = "• unchanged"
+        print(f"  {s['attack'].upper():<10} → {s['adv_class']:<30} "
+              f"({s['adv_confidence']*100:.1f}%)  {status}")
+
     print(f"{'=' * 60}\n")
 
 

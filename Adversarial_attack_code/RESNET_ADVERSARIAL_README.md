@@ -1,284 +1,168 @@
-# ResNet Adversarial Attack Framework
+# ResNet-18 Adversarial Attack Framework
 
-This framework implements the same 4 adversarial attack techniques from SAM3, adapted for ResNet-18 image classification:
+A Python framework for running adversarial attacks against a ResNet-18 image classifier. Supports four attack methods — FGSM, PGD, C&W, and Adversarial Sticker — all run automatically on a single input image.
 
-1. **FGSM** (Fast Gradient Sign Method) - Fast single-step attack
-2. **PGD** (Projected Gradient Descent) - Iterative multi-step attack  
-3. **C&W** (Carlini & Wagner) - Optimization-based attack
-4. **Adversarial Sticker** - Localized patch attack
+---
 
-## Quick Start
+## Requirements
 
-### Basic Usage
+- Python 3.8+
+- PyTorch
+- torchvision
+- Pillow
+- matplotlib
+- numpy
 
-```bash
-# Download a test image first
-wget https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg -O cat.jpg
-
-# FGSM attack
-python run_resnet_adversarial_attacks.py --attack fgsm --image cat.jpg
-
-# PGD attack
-python run_resnet_adversarial_attacks.py --attack pgd --image cat.jpg
-
-# C&W attack
-python run_resnet_adversarial_attacks.py --attack cw --image cat.jpg
-
-# Adversarial sticker
-python run_resnet_adversarial_attacks.py --attack sticker --image cat.jpg
-```
-
-### Targeted Attacks
-
-Make ResNet misclassify a cat as a dog:
+Install dependencies:
 
 ```bash
-python run_resnet_adversarial_attacks.py \
-    --attack cw \
-    --image cat.jpg \
-    --target-class dog \
-    --iterations 150
+pip install torch torchvision pillow matplotlib numpy
 ```
 
-Sticker attack to fool classifier:
+---
+
+## Usage
 
 ```bash
-python run_resnet_adversarial_attacks.py \
-    --attack sticker \
-    --image cat.jpg \
-    --target-class dog \
-    --patch-size 60 \
-    --patch-location center
+python resnet_adversarial_framework.py --image <path_to_image> [options]
 ```
 
-## Attack Methods Comparison
+All four attacks (FGSM, PGD, C&W, Sticker) are run automatically in sequence. There is no need to specify an attack type.
 
-### FGSM (Fast Gradient Sign Method)
-- **Speed**: ⚡ Very fast (single step)
-- **Effectiveness**: ⭐⭐ Moderate
-- **Use case**: Quick testing, baseline attacks
-- **Parameters**: `--epsilon` (perturbation strength, default: 0.03)
+### Minimal example
 
 ```bash
-python run_resnet_adversarial_attacks.py \
-    --attack fgsm \
-    --image cat.jpg \
-    --epsilon 0.05
+python resnet_adversarial_framework.py --image cat.jpg
 ```
 
-### PGD (Projected Gradient Descent)  
-- **Speed**: ⚡⚡ Moderate (iterative)
-- **Effectiveness**: ⭐⭐⭐ Good
-- **Use case**: Stronger attacks than FGSM, good balance
-- **Parameters**: 
-  - `--epsilon` (perturbation budget, default: 0.03)
-  - `--iterations` (number of steps, default: 10)
+### Full example with all options
 
 ```bash
-python run_resnet_adversarial_attacks.py \
-    --attack pgd \
-    --image dog.jpg \
-    --epsilon 0.03 \
-    --iterations 20
+python resnet_adversarial_framework.py \
+  --image cat.jpg \
+  --output-dir results \
+  --epsilon 0.05 \
+  --iterations 50 \
+  --target-class "golden retriever" \
+  --patch-size 64 \
+  --patch-location top-left \
+  --amplify-perturbation 10
 ```
 
-### C&W (Carlini & Wagner)
-- **Speed**: ⚡⚡⚡ Slow (optimization-based)
-- **Effectiveness**: ⭐⭐⭐⭐ Very strong
-- **Use case**: Finding minimal perturbations, strongest attacks
-- **Parameters**: `--iterations` (optimization steps, default: 100)
+---
+
+## Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `--image` | *(required)* | Path to the input image |
+| `--output-dir` | `resnet_adversarial_results` | Root folder for saving outputs |
+| `--epsilon` | `0.03` | Max perturbation budget for FGSM and PGD (0–1 scale) |
+| `--iterations` | varies | Iteration count override (default: 10 for PGD, 100 for C&W, 200 for Sticker) |
+| `--target-class` | `None` | ImageNet class name to target (e.g. `"tabby"`) — runs a targeted attack |
+| `--patch-size` | `50` | Width/height in pixels of the adversarial sticker patch |
+| `--patch-location` | `center` | Where to place the sticker patch on the image |
+| `--amplify-perturbation` | `1.0` | How to visualize the perturbation (see below) |
+
+### `--patch-location` options
+`center`, `top-left`, `top-right`, `bottom-left`, `bottom-right`
+
+### `--amplify-perturbation` values
+| Value | Effect |
+|---|---|
+| `1.0` | Raw perturbation, no amplification (default) |
+| `-1` | Auto-scale to fill the full visual range |
+| `> 1` | Manually amplify by that factor (e.g. `10` = 10× brighter) |
+
+---
+
+## Output
+
+Results are saved under:
+
+```
+<output-dir>/<image-name>/
+```
+
+For example, running on `cat.jpg` with the default output dir produces:
+
+```
+resnet_adversarial_results/
+└── cat/
+    ├── cat_adversarial_fgsm.png
+    ├── cat_fgsm_comparison.png
+    ├── cat_adversarial_pgd.png
+    ├── cat_pgd_comparison.png
+    ├── cat_adversarial_cw.png
+    ├── cat_cw_comparison.png
+    ├── cat_adversarial_sticker.png
+    ├── cat_sticker_comparison.png
+    └── cat_sticker_sticker.png
+```
+
+Each `_comparison.png` shows a side-by-side of the original image, the adversarial image, and (where applicable) the perturbation. The `_sticker_sticker.png` file contains just the isolated adversarial patch.
+
+---
+
+## Attack Methods
+
+**FGSM** (Fast Gradient Sign Method) — Single-step attack. Fast but relatively weak. Perturbs the image by a single step in the direction of the loss gradient.
+
+**PGD** (Projected Gradient Descent) — Iterative version of FGSM. Stronger than FGSM; each step is projected back into the epsilon ball around the original image.
+
+**C&W** (Carlini & Wagner) — Optimization-based attack that minimizes L2 distortion while causing misclassification. Produces more subtle, harder-to-detect perturbations.
+
+**Adversarial Sticker** — Places a visible circular patch on the image and optimizes its appearance to fool the classifier. Unlike the other attacks, this perturbation is intentionally localized and visible.
+
+---
+
+## Targeted vs. Untargeted Attacks
+
+By default, all attacks are **untargeted** — they simply try to make the model predict any class other than the original.
+
+To run a **targeted** attack, pass a valid ImageNet class name via `--target-class`:
 
 ```bash
-python run_resnet_adversarial_attacks.py \
-    --attack cw \
-    --image bird.jpg \
-    --iterations 150 \
-    --target-class airplane
+python resnet_adversarial_framework.py --image dog.jpg --target-class "tabby"
 ```
 
-### Adversarial Sticker
-- **Speed**: ⚡⚡⚡ Slow (optimization-based)
-- **Effectiveness**: ⭐⭐⭐⭐ Very strong
-- **Use case**: Physical-world attacks, localized perturbations
-- **Special**: Creates a **printable sticker** that can fool classifiers
-- **Parameters**:
-  - `--patch-size` (sticker diameter in pixels, default: 50)
-  - `--patch-location` (center/top-left/top-right/bottom-left/bottom-right)
-  - `--iterations` (default: 200)
+The framework will attempt to make the model classify the image as that specific class. If the class name is not found in ImageNet, the attack falls back to untargeted mode with a warning.
 
-```bash
-python run_resnet_adversarial_attacks.py \
-    --attack sticker \
-    --image person.jpg \
-    --target-class dog \
-    --patch-size 80 \
-    --patch-location center \
-    --iterations 300
-```
+---
 
-**Print the sticker!** The sticker image is saved separately and can be printed to test physical-world attacks.
-
-## Parameters
-
-### Required
-- `--attack`: Attack method (`fgsm`, `pgd`, `cw`, `sticker`)
-- `--image`: Path to input image
-
-### Optional
-- `--output-dir`: Output directory (default: `resnet_adversarial_results`)
-- `--epsilon`: Perturbation budget for FGSM/PGD (default: 0.03)
-- `--iterations`: Number of iterations (default varies by attack)
-- `--target-class`: Target class name for targeted attack (e.g., `dog`, `airplane`, `toaster`)
-- `--patch-size`: Sticker size in pixels (default: 50)
-- `--patch-location`: Sticker placement (default: `center`)
-
-## Output Files
-
-Results are saved in `resnet_adversarial_results/` (or your custom `--output-dir`):
-
-1. `{image}_adversarial_{attack}.png` - Adversarial image
-2. `{image}_{attack}_comparison.png` - Side-by-side visualization
-3. `{image}_sticker_{attack}.png` - Just the sticker (for sticker attacks)
-
-## Examples by Use Case
-
-### 1. Quick untargeted attack
-```bash
-python run_resnet_adversarial_attacks.py --attack fgsm --image cat.jpg
-```
-
-### 2. Strong targeted misclassification
-```bash
-python run_resnet_adversarial_attacks.py \
-    --attack cw \
-    --image cat.jpg \
-    --target-class dog \
-    --iterations 200
-```
-
-### 3. Physical-world printable sticker
-```bash
-python run_resnet_adversarial_attacks.py \
-    --attack sticker \
-    --image stop_sign.jpg \
-    --target-class "speed limit" \
-    --patch-size 100 \
-    --iterations 400
-```
-
-### 4. Compare all 4 attacks
-```bash
-#!/bin/bash
-IMAGE="cat.jpg"
-
-python run_resnet_adversarial_attacks.py --attack fgsm --image $IMAGE
-python run_resnet_adversarial_attacks.py --attack pgd --image $IMAGE --iterations 20
-python run_resnet_adversarial_attacks.py --attack cw --image $IMAGE --iterations 100
-python run_resnet_adversarial_attacks.py --attack sticker --image $IMAGE --patch-size 60
-```
-
-## Understanding Results
-
-### Success Metrics
-
-**Untargeted Attack Success:**
-- ✓ Original and adversarial predictions are different
-- ✓ Confidence in original class drops significantly
-
-**Targeted Attack Success:**
-- ✓ Adversarial prediction matches target class
-- ✓ Target class has high confidence (>50%)
-
-### Example Output
+## Example Output (console)
 
 ```
+============================================================
+RESNET-18 ADVERSARIAL ATTACK FRAMEWORK
+============================================================
+
+Loading ResNet-18...
+Model loaded on cuda
+
+Loading image: cat.jpg
+Image size: (640, 480)
+
 Original Classification:
-  Top prediction: tabby cat (85.3%)
-  
-Adversarial Classification:
-  Top prediction: dog (72.1%)
+  Top prediction: tabby (82.3%)
+  Top-5:
+    1. tabby: 82.3%
+    2. tiger cat: 10.1%
+    ...
 
-✓ ATTACK SUCCESSFUL - Classification changed!
-✓ TARGETED ATTACK SUCCESSFUL - Misclassified as 'dog'!
+============================================================
+Running FGSM Attack
+============================================================
+  ...
+
+============================================================
+OVERALL ATTACK SUMMARY
+============================================================
+Original: tabby (82.3%)
+
+  FGSM       → Egyptian cat              (41.2%)  ✓ CHANGED
+  PGD        → Egyptian cat              (65.8%)  ✓ CHANGED
+  CW         → tiger cat                 (38.4%)  ✓ CHANGED
+  STICKER    → tabby                     (61.1%)  • unchanged
+============================================================
 ```
-
-## ImageNet Classes
-
-ResNet-18 is trained on ImageNet with 1000 classes. Common classes include:
-
-**Animals**: `cat`, `dog`, `bird`, `fish`, `horse`, `elephant`, `bear`, `tiger`, `lion`
-**Vehicles**: `car`, `truck`, `airplane`, `boat`, `bicycle`, `motorcycle`
-**Objects**: `chair`, `table`, `bottle`, `cup`, `phone`, `laptop`, `keyboard`
-**Food**: `pizza`, `burger`, `apple`, `banana`, `strawberry`
-
-See full list: [ImageNet Classes](https://gist.github.com/yrevar/942d3a0ac09ec9e5eb3a)
-
-## Comparison with SAM3 Attacks
-
-| Feature | SAM3 Attacks | ResNet Attacks |
-|---------|--------------|----------------|
-| Task | Segmentation | Classification |
-| Model | SAM3 | ResNet-18 |
-| Input | Text prompts + images | Images only |
-| Output | Masks/detections | Class labels |
-| Attack goal | Hide/show objects | Misclassify images |
-| Same techniques | FGSM, PGD, C&W, Sticker | ✓ |
-
-## Tips for Best Results
-
-1. **Start with FGSM** for quick testing
-2. **Use PGD** for better results with reasonable speed
-3. **Use C&W** when you need guaranteed success
-4. **Use Sticker** for physical-world applications
-
-### Epsilon Guidelines
-- Small (0.01-0.02): Subtle, might not fool model
-- Medium (0.03-0.05): Good balance (recommended)
-- Large (0.1+): Very noticeable, but highly effective
-
-### Iteration Guidelines
-- **PGD**: 10-40 iterations
-- **C&W**: 100-200 iterations
-- **Sticker**: 200-500 iterations
-
-## Research Applications
-
-This framework is useful for:
-- **Adversarial robustness testing**
-- **Model debugging and understanding**
-- **Security research**
-- **Physical-world attack experiments**
-
-## Advanced: Creating Universal Adversarial Patches
-
-You can use the sticker attack to create patches that fool the classifier on MULTIPLE images:
-
-```bash
-# Create sticker that makes any image look like a toaster
-python run_resnet_adversarial_attacks.py \
-    --attack sticker \
-    --image random_image.jpg \
-    --target-class toaster \
-    --patch-size 100 \
-    --iterations 500
-```
-
-Then test the sticker on different images by overlaying it!
-
-## Troubleshooting
-
-**Attack not working?**
-- Increase `--iterations`
-- Increase `--epsilon` (for FGSM/PGD)
-- Try a different attack method
-- Make sure target class is in ImageNet
-
-**Out of memory?**
-- Use smaller images
-- Reduce `--patch-size` (for sticker)
-- Use CPU instead of GPU (slower)
-
-## See Also
-
-- `run_adversarial_attacks.py` - Original SAM3 adversarial attacks
-- `diffusion_lab.py` - Example of using ResNet for classification
