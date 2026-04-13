@@ -1,0 +1,113 @@
+Logging output to: resnet_adversarial_results/cat/cat_log.txt
+
+Original Classification:
+  Top prediction: Egyptian cat (31.3%)
+  Top-5:
+    1. Egyptian cat: 31.3%
+    2. tabby: 28.8%
+    3. tiger cat: 17.5%
+    4. grey fox: 6.1%
+    5. coyote: 3.7%
+
+Warning: 'horse' not found in ImageNet classes
+Running untargeted attacks instead
+
+============================================================
+Running FGSM Attack
+============================================================
+
+Adversarial Classification (FGSM):
+  Top prediction: coyote (10.5%)
+  Top-5:
+    1. coyote: 10.5%
+    2. timber wolf: 5.2%
+    3. grey fox: 4.7%
+    4. otter: 3.9%
+    5. sea cucumber: 2.4%
+
+  Saved adversarial image: resnet_adversarial_results/cat/cat_adversarial_fgsm.png
+  Saved visualization: resnet_adversarial_results/cat/cat_fgsm_comparison.png
+  Memory cleared after FGSM attack.
+
+============================================================
+Running PGD Attack
+============================================================
+  Running PGD attack with 10 iterations...
+    Iteration 2/10, Loss: -4.8909
+    Iteration 4/10, Loss: 3.4035
+    Iteration 6/10, Loss: 8.9787
+    Iteration 8/10, Loss: 10.7883
+    Iteration 10/10, Loss: 12.5572
+
+Adversarial Classification (PGD):
+  Top prediction: toilet tissue (69.7%)
+  Top-5:
+    1. toilet tissue: 69.7%
+    2. space shuttle: 20.7%
+    3. paper towel: 7.6%
+    4. ice bear: 0.6%
+    5. soccer ball: 0.4%
+
+  Saved adversarial image: resnet_adversarial_results/cat/cat_adversarial_pgd.png
+  Saved visualization: resnet_adversarial_results/cat/cat_pgd_comparison.png
+  Memory cleared after PGD attack.
+
+============================================================
+Running CW Attack
+============================================================
+  Running C&W attack with 100 iterations...
+    Iteration 20/100, Loss: 32.8415, L2: 132.8415
+    Iteration 40/100, Loss: 32.2392, L2: 132.2392
+    Iteration 60/100, Loss: 31.3319, L2: 131.3319
+    Iteration 80/100, Loss: 30.2500, L2: 130.2500
+    Iteration 100/100, Loss: 29.0373, L2: 129.0373
+
+Adversarial Classification (CW):
+  Top prediction: brass (48.6%)
+  Top-5:
+    1. brass: 48.6%
+    2. brain coral: 17.3%
+    3. manhole cover: 8.9%
+    4. tray: 2.5%
+    5. envelope: 1.4%
+
+  Saved adversarial image: resnet_adversarial_results/cat/cat_adversarial_cw.png
+  Saved visualization: resnet_adversarial_results/cat/cat_cw_comparison.png
+  Memory cleared after CW attack.
+
+============================================================
+Running STICKER Attack
+============================================================
+  Running Sticker attack with 200 iterations...
+  Patch location: (87, 87), size: 50x50
+    Iteration 40/200, Loss: -75.8416
+    Iteration 80/200, Loss: -99.1326
+    Iteration 120/200, Loss: -99.9847
+    Iteration 160/200, Loss: -99.9841
+    Iteration 200/200, Loss: -99.9838
+  Saved sticker: resnet_adversarial_results/cat/cat_sticker_sticker.png
+
+Adversarial Classification (STICKER):
+  Top prediction: tabby (60.1%)
+  Top-5:
+    1. tabby: 60.1%
+    2. tiger cat: 39.7%
+    3. tiger: 0.2%
+    4. Egyptian cat: 0.0%
+    5. Yorkshire terrier: 0.0%
+
+  Saved adversarial image: resnet_adversarial_results/cat/cat_adversarial_sticker.png
+  Saved visualization: resnet_adversarial_results/cat/cat_sticker_comparison.png
+  Memory cleared after STICKER attack.
+
+============================================================
+OVERALL ATTACK SUMMARY
+============================================================
+Original: Egyptian cat (31.3%)
+
+  FGSM       → coyote                         (10.5%)  ✓ CHANGED
+  PGD        → toilet tissue                  (69.7%)  ✓ CHANGED
+  CW         → brass                          (48.6%)  ✓ CHANGED
+  STICKER    → tabby                          (60.1%)  ✓ CHANGED
+============================================================
+

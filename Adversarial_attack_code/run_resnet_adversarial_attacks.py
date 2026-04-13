@@ -12,6 +12,7 @@ from torchvision.models import resnet18, ResNet18_Weights
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 import os
+import sys
 import argparse
 import numpy as np
 
@@ -491,6 +492,25 @@ def run_attack(attack_name, model, device, args, original_image, source_class,
     return summary
 
 
+class Tee:
+    """Mirrors stdout to both the console and a log file simultaneously."""
+
+    def __init__(self, log_path):
+        self.terminal = sys.stdout
+        self.log = open(log_path, 'w', buffering=1)
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Adversarial Attacks on ResNet-18')
     parser.add_argument('--image', type=str, required=True,
@@ -501,7 +521,7 @@ def main():
                        help='Perturbation budget for FGSM/PGD')
     parser.add_argument('--iterations', type=int, default=None,
                        help='Number of iterations (default: 10 for PGD, 100 for C&W, 200 for sticker)')
-    parser.add_argument('--target-class', type=str, default=None,
+    parser.add_argument('--target-class', type=str, default="horse",
                        help='Target class name for targeted attack')
     parser.add_argument('--patch-size', type=int, default=50,
                        help='Sticker patch size')
@@ -538,6 +558,12 @@ def main():
     image_name = os.path.splitext(os.path.basename(args.image))[0]
     output_dir = os.path.join(args.output_dir, image_name)
     os.makedirs(output_dir, exist_ok=True)
+
+    # Mirror all stdout to a log file in the output directory
+    log_path = os.path.join(output_dir, f"{image_name}_log.txt")
+    tee = Tee(log_path)
+    sys.stdout = tee
+    print(f"Logging output to: {log_path}")
 
     # Get original prediction using a base attacker instance
     base_attacker = ResNetAdversarialAttacker(model, device)
@@ -596,6 +622,11 @@ def main():
               f"({s['adv_confidence']*100:.1f}%)  {status}")
 
     print(f"{'=' * 60}\n")
+
+    # Restore stdout and close the log file
+    sys.stdout = tee.terminal
+    tee.close()
+    print(f"Log saved to: {log_path}")
 
 
 if __name__ == "__main__":

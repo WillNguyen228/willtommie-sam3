@@ -1,0 +1,113 @@
+Logging output to: resnet_adversarial_results/tiger/tiger_log.txt
+
+Original Classification:
+  Top prediction: tiger (88.0%)
+  Top-5:
+    1. tiger: 88.0%
+    2. tiger cat: 11.8%
+    3. jaguar: 0.1%
+    4. zebra: 0.0%
+    5. lynx: 0.0%
+
+Warning: 'horse' not found in ImageNet classes
+Running untargeted attacks instead
+
+============================================================
+Running FGSM Attack
+============================================================
+
+Adversarial Classification (FGSM):
+  Top prediction: tiger cat (14.9%)
+  Top-5:
+    1. tiger cat: 14.9%
+    2. leopard: 11.7%
+    3. lynx: 8.3%
+    4. tiger: 5.1%
+    5. Egyptian cat: 5.1%
+
+  Saved adversarial image: resnet_adversarial_results/tiger/tiger_adversarial_fgsm.png
+  Saved visualization: resnet_adversarial_results/tiger/tiger_fgsm_comparison.png
+  Memory cleared after FGSM attack.
+
+============================================================
+Running PGD Attack
+============================================================
+  Running PGD attack with 10 iterations...
+    Iteration 2/10, Loss: -11.2510
+    Iteration 4/10, Loss: 0.6192
+    Iteration 6/10, Loss: 5.2634
+    Iteration 8/10, Loss: 7.0025
+    Iteration 10/10, Loss: 8.4541
+
+Adversarial Classification (PGD):
+  Top prediction: hummingbird (36.7%)
+  Top-5:
+    1. hummingbird: 36.7%
+    2. red-backed sandpiper: 15.0%
+    3. puffer: 10.9%
+    4. custard apple: 10.7%
+    5. horned viper: 3.3%
+
+  Saved adversarial image: resnet_adversarial_results/tiger/tiger_adversarial_pgd.png
+  Saved visualization: resnet_adversarial_results/tiger/tiger_pgd_comparison.png
+  Memory cleared after PGD attack.
+
+============================================================
+Running CW Attack
+============================================================
+  Running C&W attack with 100 iterations...
+    Iteration 20/100, Loss: 18.9035, L2: 118.9035
+    Iteration 40/100, Loss: 18.3190, L2: 118.3190
+    Iteration 60/100, Loss: 17.4357, L2: 117.4357
+    Iteration 80/100, Loss: 16.3801, L2: 116.3801
+    Iteration 100/100, Loss: 15.1946, L2: 115.1946
+
+Adversarial Classification (CW):
+  Top prediction: brass (25.0%)
+  Top-5:
+    1. brass: 25.0%
+    2. brain coral: 21.1%
+    3. manhole cover: 3.6%
+    4. wall clock: 2.5%
+    5. shower curtain: 2.4%
+
+  Saved adversarial image: resnet_adversarial_results/tiger/tiger_adversarial_cw.png
+  Saved visualization: resnet_adversarial_results/tiger/tiger_cw_comparison.png
+  Memory cleared after CW attack.
+
+============================================================
+Running STICKER Attack
+============================================================
+  Running Sticker attack with 200 iterations...
+  Patch location: (87, 87), size: 50x50
+    Iteration 40/200, Loss: -99.9898
+    Iteration 80/200, Loss: -99.9892
+    Iteration 120/200, Loss: -99.9891
+    Iteration 160/200, Loss: -99.9891
+    Iteration 200/200, Loss: -99.9891
+  Saved sticker: resnet_adversarial_results/tiger/tiger_sticker_sticker.png
+
+Adversarial Classification (STICKER):
+  Top prediction: zebra (99.6%)
+  Top-5:
+    1. zebra: 99.6%
+    2. peacock: 0.2%
+    3. prairie chicken: 0.1%
+    4. leopard: 0.0%
+    5. chambered nautilus: 0.0%
+
+  Saved adversarial image: resnet_adversarial_results/tiger/tiger_adversarial_sticker.png
+  Saved visualization: resnet_adversarial_results/tiger/tiger_sticker_comparison.png
+  Memory cleared after STICKER attack.
+
+============================================================
+OVERALL ATTACK SUMMARY
+============================================================
+Original: tiger (88.0%)
+
+  FGSM       → tiger cat                      (14.9%)  ✓ CHANGED
+  PGD        → hummingbird                    (36.7%)  ✓ CHANGED
+  CW         → brass                          (25.0%)  ✓ CHANGED
+  STICKER    → zebra                          (99.6%)  ✓ CHANGED
+============================================================
+

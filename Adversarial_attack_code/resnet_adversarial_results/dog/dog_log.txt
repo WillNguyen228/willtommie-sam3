@@ -1,0 +1,113 @@
+Logging output to: resnet_adversarial_results/dog/dog_log.txt
+
+Original Classification:
+  Top prediction: Rhodesian ridgeback (65.1%)
+  Top-5:
+    1. Rhodesian ridgeback: 65.1%
+    2. vizsla: 30.8%
+    3. redbone: 2.1%
+    4. Chesapeake Bay retriever: 0.9%
+    5. Labrador retriever: 0.2%
+
+Warning: 'horse' not found in ImageNet classes
+Running untargeted attacks instead
+
+============================================================
+Running FGSM Attack
+============================================================
+
+Adversarial Classification (FGSM):
+  Top prediction: Chesapeake Bay retriever (35.5%)
+  Top-5:
+    1. Chesapeake Bay retriever: 35.5%
+    2. golden retriever: 10.9%
+    3. kuvasz: 8.4%
+    4. curly-coated retriever: 6.9%
+    5. Labrador retriever: 6.8%
+
+  Saved adversarial image: resnet_adversarial_results/dog/dog_adversarial_fgsm.png
+  Saved visualization: resnet_adversarial_results/dog/dog_fgsm_comparison.png
+  Memory cleared after FGSM attack.
+
+============================================================
+Running PGD Attack
+============================================================
+  Running PGD attack with 10 iterations...
+    Iteration 2/10, Loss: -9.8541
+    Iteration 4/10, Loss: -2.6849
+    Iteration 6/10, Loss: -0.5648
+    Iteration 8/10, Loss: 0.5115
+    Iteration 10/10, Loss: 1.0237
+
+Adversarial Classification (PGD):
+  Top prediction: standard poodle (13.8%)
+  Top-5:
+    1. standard poodle: 13.8%
+    2. Chesapeake Bay retriever: 6.2%
+    3. curly-coated retriever: 6.0%
+    4. kuvasz: 5.4%
+    5. Arabian camel: 3.8%
+
+  Saved adversarial image: resnet_adversarial_results/dog/dog_adversarial_pgd.png
+  Saved visualization: resnet_adversarial_results/dog/dog_pgd_comparison.png
+  Memory cleared after PGD attack.
+
+============================================================
+Running CW Attack
+============================================================
+  Running C&W attack with 100 iterations...
+    Iteration 20/100, Loss: -20.1550, L2: 79.8450
+    Iteration 40/100, Loss: -20.3339, L2: 79.6661
+    Iteration 60/100, Loss: -20.8284, L2: 79.1716
+    Iteration 80/100, Loss: -21.4596, L2: 78.5404
+    Iteration 100/100, Loss: -22.1812, L2: 77.8188
+
+Adversarial Classification (CW):
+  Top prediction: brass (63.9%)
+  Top-5:
+    1. brass: 63.9%
+    2. manhole cover: 35.0%
+    3. brain coral: 0.8%
+    4. maze: 0.2%
+    5. bottlecap: 0.0%
+
+  Saved adversarial image: resnet_adversarial_results/dog/dog_adversarial_cw.png
+  Saved visualization: resnet_adversarial_results/dog/dog_cw_comparison.png
+  Memory cleared after CW attack.
+
+============================================================
+Running STICKER Attack
+============================================================
+  Running Sticker attack with 200 iterations...
+  Patch location: (87, 87), size: 50x50
+    Iteration 40/200, Loss: -44.8982
+    Iteration 80/200, Loss: -58.5798
+    Iteration 120/200, Loss: -65.4791
+    Iteration 160/200, Loss: -68.8669
+    Iteration 200/200, Loss: -71.2206
+  Saved sticker: resnet_adversarial_results/dog/dog_sticker_sticker.png
+
+Adversarial Classification (STICKER):
+  Top prediction: vizsla (98.5%)
+  Top-5:
+    1. vizsla: 98.5%
+    2. golden retriever: 0.3%
+    3. Labrador retriever: 0.3%
+    4. Chesapeake Bay retriever: 0.2%
+    5. redbone: 0.2%
+
+  Saved adversarial image: resnet_adversarial_results/dog/dog_adversarial_sticker.png
+  Saved visualization: resnet_adversarial_results/dog/dog_sticker_comparison.png
+  Memory cleared after STICKER attack.
+
+============================================================
+OVERALL ATTACK SUMMARY
+============================================================
+Original: Rhodesian ridgeback (65.1%)
+
+  FGSM       → Chesapeake Bay retriever       (35.5%)  ✓ CHANGED
+  PGD        → standard poodle                (13.8%)  ✓ CHANGED
+  CW         → brass                          (63.9%)  ✓ CHANGED
+  STICKER    → vizsla                         (98.5%)  ✓ CHANGED
+============================================================
+
