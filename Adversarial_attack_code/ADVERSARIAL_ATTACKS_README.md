@@ -18,29 +18,29 @@ Run an attack using keywords: `fgsm`, `pgd` (or `pgm`), or `cw`
 
 ```bash
 # FGSM attack on cat image
-python run_adversarial_attacks.py --attack fgsm --image data/cat.jpg --prompt cat
+python run_adversarial_attacks.py --attack fgsm --image ../data/cat.jpg --prompt cat
 
 # PGD attack on dog image  
-python run_adversarial_attacks.py --attack pgd --image data/dog.png --prompt dog
+python run_adversarial_attacks.py --attack pgd --image ../data/dog.png --prompt dog
 
 # C&W attack on panda
-python run_adversarial_attacks.py --attack cw --image data/panda.png --prompt panda
+python run_adversarial_attacks.py --attack cw --image ../data/panda.png --prompt panda
 ```
 
 ### Advanced Options
 
 ```bash
 # FGSM with custom epsilon (perturbation strength)
-python run_adversarial_attacks.py --attack fgsm --image data/cat.jpg --prompt cat --epsilon 0.05
+python run_adversarial_attacks.py --attack fgsm --image ../data/cat.jpg --prompt cat --epsilon 0.05
 
 # PGD with more iterations and custom epsilon
-python run_adversarial_attacks.py --attack pgd --image data/dog.png --prompt dog --epsilon 0.03 --iterations 20
+python run_adversarial_attacks.py --attack pgd --image ../data/dog.png --prompt dog --epsilon 0.03 --iterations 20
 
 # C&W with custom iterations
-python run_adversarial_attacks.py --attack cw --image data/tiger.png --prompt tiger --iterations 150
+python run_adversarial_attacks.py --attack cw --image ../data/tiger.png --prompt tiger --iterations 150
 
 # Custom output directory
-python run_adversarial_attacks.py --attack fgsm --image data/rabbit.jpg --prompt rabbit --output-dir my_results
+python run_adversarial_attacks.py --attack fgsm --image ../data/rabbit.jpg --prompt rabbit --output-dir my_results
 ```
 
 ## Parameters
@@ -105,9 +105,9 @@ adversarial_results/
 
 ```bash
 # Test all three attacks on the same image
-python run_adversarial_attacks.py --attack fgsm --image data/cat.jpg --prompt cat
-python run_adversarial_attacks.py --attack pgd --image data/cat.jpg --prompt cat  
-python run_adversarial_attacks.py --attack cw --image data/cat.jpg --prompt cat
+python run_adversarial_attacks.py --attack fgsm --image ../data/cat.jpg --prompt cat
+python run_adversarial_attacks.py --attack pgd --image ../data/cat.jpg --prompt cat  
+python run_adversarial_attacks.py --attack cw --image ../data/cat.jpg --prompt cat
 
 # Results will show:
 # - Number of detections before/after attack

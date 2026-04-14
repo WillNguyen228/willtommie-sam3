@@ -1,7 +1,12 @@
 """
 SAM3 Adversarial Attack Framework
-Supports FGSM, PGD, and C&W attacks on SAM3 model
+Supports FGSM, PGD, C&W, Adversarial Sticker, and Score-Based attacks on SAM3 model
 """
+
+# Add parent directory to path so we can import sam3 module
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import torch
 import torch.nn.functional as F
@@ -688,8 +693,220 @@ class AdversarialSticker(AdversarialAttacker):
         return adversarial_image_sam3, adversarial_image_display, patch_pil, (patch_x, patch_y), best_loss
 
 
+class ScoreBased(AdversarialAttacker):
+    """Score-Based Attack using Natural Evolution Strategies (NES) for gradient estimation
+    
+    This is a black-box attack that only requires access to model output scores (logits/probabilities),
+    not gradients. It estimates gradients by sampling random perturbations and using the model's
+    output scores to compute a weighted combination that approximates the true gradient direction.
+    """
+    
+    def __init__(self, model, processor, epsilon=0.1, iterations=50, num_samples=20, 
+                 sigma=0.001, learning_rate=0.01, target_class=None, device="cuda"):
+        super().__init__(model, processor, device)
+        self.epsilon = epsilon  # Maximum perturbation magnitude
+        self.iterations = iterations  # Number of optimization steps
+        self.num_samples = num_samples  # Number of random samples per gradient estimation
+        self.sigma = sigma  # Sampling standard deviation for perturbations
+        self.learning_rate = learning_rate  # Step size for updates
+        self.target_class = target_class  # If None, untargeted attack
+        
+    def estimate_gradient_nes(self, image_tensor, target_prompt):
+        """
+        Estimate gradient using Natural Evolution Strategies (NES)
+        
+        NES samples random directions, evaluates the loss in those directions,
+        and computes a weighted average to approximate the gradient.
+        
+        For UNTARGETED attacks: We want to DECREASE detection confidence.
+        So we define attack_success = -detection_confidence (higher = better attack)
+        
+        Args:
+            image_tensor: Current adversarial image tensor
+            target_prompt: Text prompt for detection
+            
+        Returns:
+            gradient_estimate: Approximation of the gradient
+        """
+        # Sample random perturbation directions from Gaussian distribution
+        # Shape: (num_samples, channels, height, width)
+        perturbations = torch.randn(
+            self.num_samples, *image_tensor.shape[1:], 
+            device=self.device
+        )
+        
+        # Evaluate attack success for each perturbed sample
+        # Higher success = better attack = lower detection
+        attack_scores = []
+        
+        for i in range(self.num_samples):
+            # Apply perturbation
+            perturbed = image_tensor + self.sigma * perturbations[i:i+1]
+            perturbed = torch.clamp(perturbed, -1, 1)
+            
+            # Compute attack success score (no gradients needed - score-based only)
+            with torch.no_grad():
+                if self.target_class:
+                    # For targeted: minimize source, maximize target
+                    _, src_out, tgt_out = self.compute_targeted_loss(
+                        perturbed, target_prompt, self.target_class
+                    )
+                    src_conf = src_out["pred_logits"].sigmoid().max().item()
+                    tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
+                    # Attack success using log-loss formulation (like cross-entropy)
+                    # Higher = better attack
+                    score = -torch.log(torch.tensor(src_conf + 1e-10)).item() + torch.log(torch.tensor(tgt_conf + 1e-10)).item()
+                else:
+                    # For untargeted: minimize detection
+                    # Use negative log-probability (like cross-entropy loss)
+                    _, outputs = self.compute_loss(perturbed, target_prompt)
+                    detection_conf = outputs["pred_logits"].sigmoid().max().item()
+                    # Attack success = -log(detection_confidence)
+                    # When detection_conf is high (0.95), score is low (-0.05)
+                    # When detection_conf is low (0.1), score is high (-(-2.3) = 2.3)
+                    # Higher score = better attack
+                    score = -torch.log(torch.tensor(detection_conf + 1e-10)).item()
+                
+                attack_scores.append(score)
+        
+        # Convert to tensor
+        scores_tensor = torch.tensor(attack_scores, device=self.device)
+        
+        # Debug: print score statistics
+        if torch.rand(1).item() < 0.1:  # Print 10% of the time to avoid spam
+            print(f"      [NES Debug] Score range: [{scores_tensor.min().item():.4f}, {scores_tensor.max().item():.4f}], "
+                  f"mean: {scores_tensor.mean().item():.4f}, std: {scores_tensor.std().item():.6f}")
+        
+        # Standard NES with baseline subtraction
+        # Directions with higher-than-average attack success get positive weight
+        scores_mean = scores_tensor.mean()
+        scores_centered = scores_tensor - scores_mean
+        
+        # Estimate gradient: directions with better attack scores (higher) contribute positively
+        # Formula: ĝ ≈ (1/Nσ) Σ (score_k - score_mean) * u_k
+        gradient_estimate = torch.zeros_like(image_tensor)
+        
+        for i in range(self.num_samples):
+            gradient_estimate += scores_centered[i] * perturbations[i:i+1]
+        
+        # Scale by (1 / (N * sigma)) as per NES formula
+        gradient_estimate = gradient_estimate / (self.num_samples * self.sigma)
+        
+        return gradient_estimate
+    
+    def attack(self, image, target_prompt):
+        """
+        Perform score-based adversarial attack using NES gradient estimation
+        
+        Args:
+            image: PIL Image
+            target_prompt: text prompt for detection (source class for targeted attack)
+            
+        Returns:
+            adversarial_image: PIL Image with adversarial perturbation
+            perturbation: the actual perturbation added
+            final_loss: final loss value
+        """
+        # Preprocess image
+        original_tensor, original_size = self.preprocess_image(image)
+        perturbed_tensor = original_tensor.clone().detach()
+        
+        if self.target_class:
+            print(f"  Running TARGETED Score-Based attack with {self.iterations} iterations...")
+            print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
+            print(f"  Using {self.num_samples} samples per gradient estimation")
+        else:
+            print(f"  Running Score-Based attack with {self.iterations} iterations...")
+            print(f"  Using {self.num_samples} samples per gradient estimation")
+        
+        best_perturbation = None
+        best_score = float('-inf')  # Track HIGHEST attack success score
+        
+        # Total queries counter
+        total_queries = 0
+        
+        for i in range(self.iterations):
+            # Estimate gradient using NES (requires num_samples queries)
+            gradient_estimate = self.estimate_gradient_nes(perturbed_tensor, target_prompt)
+            total_queries += self.num_samples
+            
+            # Debug: check gradient magnitude
+            grad_norm = torch.norm(gradient_estimate).item()
+            grad_max = torch.abs(gradient_estimate).max().item()
+            
+            # Update perturbed image in the direction of estimated gradient
+            with torch.no_grad():
+                # Normalize gradient to unit norm for stable updates
+                grad_norm = torch.norm(gradient_estimate)
+                if grad_norm > 1e-8:
+                    gradient_normalized = gradient_estimate / grad_norm
+                else:
+                    gradient_normalized = gradient_estimate
+                
+                # Take a step using normalized gradient (preserves direction, controlled magnitude)
+                perturbed_tensor = perturbed_tensor + self.learning_rate * gradient_normalized
+                
+                # Project back to epsilon ball around original image
+                perturbation = perturbed_tensor - original_tensor
+                perturbation = torch.clamp(perturbation, -self.epsilon, self.epsilon)
+                
+                # Apply perturbation and clip to valid range
+                perturbed_tensor = torch.clamp(original_tensor + perturbation, -1, 1)
+            
+            # Evaluate current solution (1 additional query for monitoring)
+            with torch.no_grad():
+                if self.target_class:
+                    _, src_out, tgt_out = self.compute_targeted_loss(
+                        perturbed_tensor, target_prompt, self.target_class
+                    )
+                    src_conf = src_out["pred_logits"].sigmoid().max().item()
+                    tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
+                    current_score = -torch.log(torch.tensor(src_conf + 1e-10)).item() + torch.log(torch.tensor(tgt_conf + 1e-10)).item()
+                else:
+                    _, outputs = self.compute_loss(perturbed_tensor, target_prompt)
+                    detection_conf = outputs["pred_logits"].sigmoid().max().item()
+                    current_score = -torch.log(torch.tensor(detection_conf + 1e-10)).item()
+                
+                total_queries += 1
+            
+            # Periodic memory cleanup
+            if (i + 1) % 10 == 0:
+                torch.cuda.empty_cache()
+            
+            # Track best perturbation (HIGHEST attack score = lowest detection)
+            if current_score > best_score:
+                best_score = current_score
+                best_perturbation = perturbed_tensor.clone()
+            
+            # Print progress
+            if (i + 1) % 10 == 0 or i == 0:
+                if self.target_class:
+                    print(f"    Iteration {i+1}/{self.iterations}, Score: {current_score:.4f}, "
+                          f"SrcMax: {src_conf:.4f}, TgtMax: {tgt_conf:.4f}, Queries: {total_queries}, "
+                          f"GradNorm: {grad_norm:.6f}, GradMax: {grad_max:.6f}")
+                else:
+                    print(f"    Iteration {i+1}/{self.iterations}, Score: {current_score:.4f}, "
+                          f"DetectionMax: {detection_conf:.4f}, Queries: {total_queries}, "
+                          f"GradNorm: {grad_norm:.6f}, GradMax: {grad_max:.6f}")
+        
+        print(f"  Total queries: {total_queries}")
+        
+        # Use best perturbation found
+        if best_perturbation is not None:
+            final_perturbed = best_perturbation
+        else:
+            final_perturbed = perturbed_tensor
+        
+        # Convert back to PIL and resize to original dimensions
+        adversarial_image = self.tensor_to_pil(final_perturbed, original_size)
+        final_perturbation = final_perturbed - original_tensor
+        
+        return adversarial_image, final_perturbation, best_score
+
+
 def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, target_class=None, 
-                           stealthy=False, patch_size=150, patch_location='center', max_size=None):
+                           stealthy=False, patch_size=150, patch_location='center', max_size=None, 
+                           epsilon=0.1, iterations=10):
     """Test adversarial attack on a single image"""
     
     # Create subfolder for this animal
@@ -758,9 +975,11 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
     print(f"\n--- Applying {attack_method.upper()} Attack ---")
     
     if attack_method.lower() == 'fgsm':
-        attacker = FGSM(model, processor, epsilon=0.03)
+        attacker = FGSM(model, processor, epsilon=epsilon)
     elif attack_method.lower() in ['pgd', 'pgm']:
-        attacker = PGD(model, processor, epsilon=0.03, alpha=0.01, iterations=10)
+        # Alpha is typically epsilon/iterations for good convergence
+        alpha = epsilon / iterations
+        attacker = PGD(model, processor, epsilon=epsilon, alpha=alpha, iterations=iterations)
     elif attack_method.lower() == 'cw':
         # Use stronger parameters for targeted attacks
         c_param = 10.0 if target_class else 1.0
@@ -780,6 +999,17 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
         attacker = AdversarialSticker(model, processor, patch_size=patch_size, location=patch_location,
                                      c=10.0, iterations=200, learning_rate=0.1, 
                                      target_class=target_class)
+    elif attack_method.lower() == 'scorebased':
+        # Score-based attack using Natural Evolution Strategies (NES)
+        # Query-efficient black-box attack that only needs model output scores
+        num_samples = 100  # Increased for more accurate gradient estimates
+        sigma = 0.2  # Larger sampling radius for stronger signal (was 0.1)
+        lr_scorebased = 0.05  # Larger step size for more aggressive updates (was 0.01)
+        print(f"  Score-based attack parameters: samples={num_samples}, sigma={sigma}, lr={lr_scorebased}")
+        print(f"  Note: Score-based attacks are query-intensive. Using {num_samples} samples per iteration.")
+        attacker = ScoreBased(model, processor, epsilon=epsilon, iterations=iterations,
+                             num_samples=num_samples, sigma=sigma, learning_rate=lr_scorebased,
+                             target_class=target_class)
     else:
         print(f"Unknown attack method: {attack_method}")
         return
@@ -938,18 +1168,18 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
 def main():
     parser = argparse.ArgumentParser(description='SAM3 Adversarial Attack Framework')
     parser.add_argument('--attack', type=str, default='all', 
-                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker', 'all'],
-                       help='Attack method: fgsm, pgd/pgm, cw, sticker, or all (default: all)')
+                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker', 'scorebased', 'all'],
+                       help='Attack method: fgsm, pgd/pgm, cw, sticker, scorebased, or all (default: all)')
     parser.add_argument('--image', type=str, default='data/cat.jpg',
                        help='Path to input image')
     parser.add_argument('--prompt', type=str, default='cat',
                        help='Text prompt for detection (source class)')
     parser.add_argument('--target', type=str, default=None,
-                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with C&W and sticker attacks.')
+                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with C&W, sticker, and score-based attacks.')
     parser.add_argument('--output-dir', type=str, default='adversarial_results',
                        help='Output directory for results')
-    parser.add_argument('--epsilon', type=float, default=0.03,
-                       help='Perturbation budget for FGSM/PGD')
+    parser.add_argument('--epsilon', type=float, default=0.1,
+                       help='Perturbation budget for FGSM/PGD (default: 0.1, range: 0.01-0.3)')
     parser.add_argument('--iterations', type=int, default=10,
                        help='Number of iterations for PGD/CW')
     parser.add_argument('--stealthy', action='store_true',
@@ -966,23 +1196,23 @@ def main():
     
     # Determine which attacks to run
     if args.attack == 'all':
-        attacks_to_run = ['fgsm', 'pgd', 'cw', 'sticker']
+        attacks_to_run = ['fgsm', 'pgd', 'cw', 'sticker', 'scorebased']
     else:
         attacks_to_run = [args.attack]
     
     # Validate targeted attack
     if args.target:
         for attack in attacks_to_run:
-            if attack not in ['cw', 'sticker']:
-                print(f"WARNING: Targeted attacks (--target) only supported for C&W and sticker attacks.")
+            if attack not in ['cw', 'sticker', 'scorebased']:
+                print(f"WARNING: Targeted attacks (--target) only supported for C&W, sticker, and score-based attacks.")
                 print(f"         Will skip targeted mode for {attack.upper()}.")
         # Filter to only attacks that support targeting
         if args.attack == 'all':
-            attacks_to_run_with_target = ['cw', 'sticker']
+            attacks_to_run_with_target = ['cw', 'sticker', 'scorebased']
             attacks_to_run_without_target = [a for a in attacks_to_run if a not in attacks_to_run_with_target]
         else:
-            attacks_to_run_with_target = [a for a in attacks_to_run if a in ['cw', 'sticker']]
-            attacks_to_run_without_target = [a for a in attacks_to_run if a not in ['cw', 'sticker']]
+            attacks_to_run_with_target = [a for a in attacks_to_run if a in ['cw', 'sticker', 'scorebased']]
+            attacks_to_run_without_target = [a for a in attacks_to_run if a not in ['cw', 'sticker', 'scorebased']]
     else:
         attacks_to_run_with_target = []
         attacks_to_run_without_target = attacks_to_run
@@ -993,18 +1223,18 @@ def main():
     # Run attacks without targeting first
     for attack_method in attacks_to_run_without_target:
         test_adversarial_attack(attack_method, args.image, args.prompt, args.output_dir, 
-                               None, args.stealthy, args.patch_size, args.patch_location, args.max_size)
+                               None, args.stealthy, args.patch_size, args.patch_location, args.max_size, 
+                               args.epsilon, args.iterations)
     
     # Run attacks with targeting
     for attack_method in attacks_to_run_with_target:
         test_adversarial_attack(attack_method, args.image, args.prompt, args.output_dir, 
-                               args.target, args.stealthy, args.patch_size, args.patch_location, args.max_size)
+                               args.target, args.stealthy, args.patch_size, args.patch_location, args.max_size, 
+                               args.epsilon, args.iterations)
     
     print(f"\n{'='*70}")
     print(f"All results saved in '{args.output_dir}/{args.prompt}/' folder")
-    print('='*70)
-
-#TODO: Boost the pertubation signal in FGSM 
+    print('='*70) 
 
 if __name__ == "__main__":
     main()
