@@ -18,7 +18,7 @@ processor = Sam3Processor(model, confidence_threshold=0.1)
 # Define images and their prompts
 images_to_process = [
     ("data/cat.jpg", "cat"),
-    ("data/dog_adversarial_pgd.png", "dog"),
+    ("data/dog.png", "dog"),
     ("data/panda.png", "panda"),
     ("data/rabbit.jpg", "rabbit"),
     ("data/tiger.png", "tiger")
