@@ -1,6 +1,6 @@
 """
 SAM3 Adversarial Attack Framework
-Supports FGSM, PGD, C&W, Adversarial Sticker, and Score-Based attacks on SAM3 model
+Supports FGSM, PGD, C&W, Adversarial Sticker, Score-Based, and Decision-Based attacks on SAM3 model
 """
 
 # Add parent directory to path so we can import sam3 module
@@ -904,6 +904,274 @@ class ScoreBased(AdversarialAttacker):
         return adversarial_image, final_perturbation, best_score
 
 
+class DecisionBased(AdversarialAttacker):
+    """Decision-Based Attack (Boundary Attack) using only hard-label predictions
+    
+    This is the most restrictive black-box attack that only requires access to the final
+    prediction label (e.g., "detected" or "not detected"), not gradients or confidence scores.
+    
+    The Boundary Attack:
+    1. Starts with an initial adversarial example (could be random noise or from transfer attack)
+    2. Iteratively walks along the decision boundary towards the original image
+    3. At each step, proposes a new candidate by:
+       - Taking a random step roughly orthogonal to the line connecting current point to original
+       - Checking if it remains adversarial (only using hard labels)
+       - Checking if it's closer to the original image
+    4. Accepts the step only if both conditions are met
+    
+    This approach requires many queries but works when only binary decisions are available.
+    """
+    
+    def __init__(self, model, processor, iterations=1000, initial_num_evals=100,
+                 max_num_evals=10000, step_adapt=0.9, spherical_step_size=0.01, 
+                 source_step_size=0.01, target_class=None, device="cuda"):
+        super().__init__(model, processor, device)
+        self.iterations = iterations
+        self.initial_num_evals = initial_num_evals  # Evals for initial adversarial
+        self.max_num_evals = max_num_evals  # Max total queries
+        self.step_adapt = step_adapt  # Step size adaptation rate
+        self.spherical_step_size = spherical_step_size  # Initial orthogonal step size
+        self.source_step_size = source_step_size  # Initial step size towards source
+        self.target_class = target_class
+        
+    def is_adversarial(self, image_tensor, target_prompt):
+        """
+        Check if image is adversarial using ONLY hard labels (decision-based)
+        
+        Returns True if:
+        - Untargeted: target_prompt is NOT detected (or very weakly detected)
+        - Targeted: target_class IS detected AND target_prompt is NOT detected
+        
+        This function only uses binary decision outcomes, not confidence scores.
+        """
+        with torch.no_grad():
+            # Get predictions for target_prompt (source class)
+            backbone_out = self.model.backbone.forward_image(image_tensor)
+            text_outputs = self.model.backbone.forward_text([target_prompt], device=self.device)
+            backbone_out.update(text_outputs)
+            geometric_prompt = self.model._get_dummy_prompt()
+            
+            outputs = self.model.forward_grounding(
+                backbone_out=backbone_out,
+                find_input=self.processor.find_stage,
+                geometric_prompt=geometric_prompt,
+                find_target=None,
+            )
+            
+            # Hard decision: detected if max confidence > threshold
+            source_logits = outputs["pred_logits"].sigmoid()
+            source_detected = source_logits.max().item() > 0.3  # Binary decision
+            
+            if self.target_class:
+                # For targeted attack, also check target class
+                backbone_out_target = self.model.backbone.forward_image(image_tensor)
+                text_outputs_target = self.model.backbone.forward_text([self.target_class], device=self.device)
+                backbone_out_target.update(text_outputs_target)
+                
+                target_outputs = self.model.forward_grounding(
+                    backbone_out=backbone_out_target,
+                    find_input=self.processor.find_stage,
+                    geometric_prompt=geometric_prompt,
+                    find_target=None,
+                )
+                
+                target_logits = target_outputs["pred_logits"].sigmoid()
+                target_detected = target_logits.max().item() > 0.3  # Binary decision
+                
+                # Adversarial if source NOT detected AND target IS detected
+                return (not source_detected) and target_detected
+            else:
+                # Untargeted: adversarial if source NOT detected
+                return not source_detected
+    
+    def generate_initial_adversarial(self, original_tensor, target_prompt, original_size):
+        """
+        Generate an initial adversarial example to start the boundary attack.
+        
+        Strategy:
+        1. Try random noise
+        2. If that fails, try uniform noise at different scales
+        3. As a last resort, use a heavily perturbed version of the original
+        """
+        print("  Searching for initial adversarial example...")
+        num_attempts = 0
+        
+        # Strategy 1: Random uniform noise
+        for attempt in range(self.initial_num_evals // 4):
+            # Generate random noise image in normalized range [-1, 1]
+            random_image = torch.rand_like(original_tensor) * 2 - 1
+            num_attempts += 1
+            
+            if self.is_adversarial(random_image, target_prompt):
+                print(f"  ✓ Found initial adversarial (random noise) after {num_attempts} attempts")
+                return random_image, num_attempts
+        
+        # Strategy 2: Blend random noise with original at different ratios
+        for blend_ratio in [0.2, 0.4, 0.6, 0.8, 1.0]:
+            for attempt in range(self.initial_num_evals // 10):
+                random_image = torch.rand_like(original_tensor) * 2 - 1
+                blended = original_tensor * (1 - blend_ratio) + random_image * blend_ratio
+                blended = torch.clamp(blended, -1, 1)
+                num_attempts += 1
+                
+                if self.is_adversarial(blended, target_prompt):
+                    print(f"  ✓ Found initial adversarial (blend ratio={blend_ratio:.1f}) after {num_attempts} attempts")
+                    return blended, num_attempts
+        
+        # Strategy 3: Heavy uniform perturbation
+        for magnitude in [0.3, 0.5, 0.8, 1.0]:
+            perturbation = torch.rand_like(original_tensor) * 2 - 1
+            perturbed = original_tensor + magnitude * perturbation
+            perturbed = torch.clamp(perturbed, -1, 1)
+            num_attempts += 1
+            
+            if self.is_adversarial(perturbed, target_prompt):
+                print(f"  ✓ Found initial adversarial (magnitude={magnitude:.1f}) after {num_attempts} attempts")
+                return perturbed, num_attempts
+        
+        print(f"  ✗ Failed to find initial adversarial after {num_attempts} attempts")
+        print(f"  Using heavily perturbed original as fallback (may not be adversarial)")
+        # Return heavily perturbed version even if not confirmed adversarial
+        perturbation = torch.rand_like(original_tensor) * 2 - 1
+        fallback = torch.clamp(original_tensor + perturbation, -1, 1)
+        return fallback, num_attempts
+    
+    def attack(self, image, target_prompt):
+        """
+        Perform Boundary Attack (Decision-Based)
+        
+        Args:
+            image: PIL Image
+            target_prompt: text prompt for detection (source class to hide)
+            
+        Returns:
+            adversarial_image: PIL Image with minimal adversarial perturbation
+            perturbation: the actual perturbation added
+            total_queries: total number of model queries used
+        """
+        # Preprocess image
+        original_tensor, original_size = self.preprocess_image(image)
+        
+        if self.target_class:
+            print(f"  Running TARGETED Decision-Based (Boundary) Attack...")
+            print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
+        else:
+            print(f"  Running Decision-Based (Boundary) Attack...")
+        
+        print(f"  WARNING: This attack is query-intensive. Max queries: {self.max_num_evals}")
+        
+        # Step 1: Find initial adversarial example
+        adversarial_tensor, init_queries = self.generate_initial_adversarial(
+            original_tensor, target_prompt, original_size
+        )
+        total_queries = init_queries
+        
+        # Verify it's adversarial
+        if not self.is_adversarial(adversarial_tensor, target_prompt):
+            print("  WARNING: Initial example is not adversarial. Attack may fail.")
+        
+        # Track best adversarial example (closest to original)
+        best_adversarial = adversarial_tensor.clone()
+        best_distance = torch.norm(best_adversarial - original_tensor).item()
+        
+        # Adaptive step sizes
+        spherical_step = self.spherical_step_size
+        source_step = self.source_step_size
+        
+        print(f"  Initial L2 distance: {best_distance:.4f}")
+        print(f"  Starting boundary walk with {self.iterations} iterations...")
+        
+        # Step 2: Iteratively walk along decision boundary
+        for iteration in range(self.iterations):
+            if total_queries >= self.max_num_evals:
+                print(f"  Reached maximum query limit ({self.max_num_evals})")
+                break
+            
+            # Unnormalized direction from adversarial to original
+            direction_to_original = original_tensor - adversarial_tensor
+            distance_to_original = torch.norm(direction_to_original)
+            
+            if distance_to_original < 1e-6:
+                print(f"  Converged: adversarial example very close to original")
+                break
+            
+            # Normalized direction
+            direction_to_original_normalized = direction_to_original / (distance_to_original + 1e-10)
+            
+            # Step 2a: Take step towards original (reduce perturbation)
+            # This is the "source step" in boundary attack terminology
+            candidate_source = adversarial_tensor + source_step * distance_to_original * direction_to_original_normalized
+            candidate_source = torch.clamp(candidate_source, -1, 1)
+            total_queries += 1
+            
+            # Check if still adversarial and closer to original
+            if self.is_adversarial(candidate_source, target_prompt):
+                distance_candidate = torch.norm(candidate_source - original_tensor).item()
+                if distance_candidate < best_distance:
+                    adversarial_tensor = candidate_source
+                    best_distance = distance_candidate
+                    best_adversarial = adversarial_tensor.clone()
+                    # Increase step size (successful step)
+                    source_step = min(source_step / self.step_adapt, 0.1)
+                else:
+                    # Decrease step size (didn't improve distance)
+                    source_step = source_step * self.step_adapt
+            else:
+                # Not adversarial anymore, decrease step size
+                source_step = source_step * self.step_adapt
+            
+            # Step 2b: Take orthogonal (spherical) step to explore boundary
+            # Sample random direction orthogonal to direction_to_original
+            random_direction = torch.randn_like(original_tensor)
+            
+            # Project random direction to be orthogonal to direction_to_original
+            # Using Gram-Schmidt: v_perp = v - (v·u)u where u is direction_to_original_normalized
+            dot_product = (random_direction * direction_to_original_normalized).sum()
+            orthogonal_direction = random_direction - dot_product * direction_to_original_normalized
+            orthogonal_direction_normalized = orthogonal_direction / (torch.norm(orthogonal_direction) + 1e-10)
+            
+            # Take spherical step
+            candidate_spherical = adversarial_tensor + spherical_step * distance_to_original * orthogonal_direction_normalized
+            candidate_spherical = torch.clamp(candidate_spherical, -1, 1)
+            total_queries += 1
+            
+            # Check if still adversarial
+            if self.is_adversarial(candidate_spherical, target_prompt):
+                distance_candidate = torch.norm(candidate_spherical - original_tensor).item()
+                if distance_candidate < best_distance:
+                    adversarial_tensor = candidate_spherical
+                    best_distance = distance_candidate
+                    best_adversarial = adversarial_tensor.clone()
+                    # Increase step size
+                    spherical_step = min(spherical_step / self.step_adapt, 0.1)
+                else:
+                    # Still adversarial but didn't improve, keep it anyway (explore boundary)
+                    adversarial_tensor = candidate_spherical
+                    spherical_step = spherical_step * self.step_adapt
+            else:
+                # Not adversarial, decrease step size
+                spherical_step = spherical_step * self.step_adapt
+            
+            # Periodic memory cleanup and progress reporting
+            if (iteration + 1) % 100 == 0 or iteration == 0:
+                torch.cuda.empty_cache()
+                print(f"    Iteration {iteration+1}/{self.iterations}, L2: {best_distance:.4f}, "
+                      f"Queries: {total_queries}, Steps: [src={source_step:.6f}, sph={spherical_step:.6f}]")
+        
+        print(f"  Total queries: {total_queries}")
+        print(f"  Final L2 distance: {best_distance:.4f}")
+        
+        # Verify final result is adversarial
+        final_is_adversarial = self.is_adversarial(best_adversarial, target_prompt)
+        print(f"  Final result is adversarial: {final_is_adversarial}")
+        
+        # Convert back to PIL and resize to original dimensions
+        adversarial_image = self.tensor_to_pil(best_adversarial, original_size)
+        final_perturbation = best_adversarial - original_tensor
+        
+        return adversarial_image, final_perturbation, total_queries
+
+
 def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, target_class=None, 
                            stealthy=False, patch_size=150, patch_location='center', max_size=None, 
                            epsilon=0.1, iterations=10):
@@ -1010,6 +1278,18 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
         attacker = ScoreBased(model, processor, epsilon=epsilon, iterations=iterations,
                              num_samples=num_samples, sigma=sigma, learning_rate=lr_scorebased,
                              target_class=target_class)
+    elif attack_method.lower() == 'decision':
+        # Decision-based attack (Boundary Attack) using only hard-label predictions
+        # Most restrictive black-box setting - only uses final prediction labels
+        boundary_iterations = 1000  # More iterations needed for boundary walking
+        max_queries = 10000  # Maximum queries allowed
+        print(f"  Decision-based attack parameters: iterations={boundary_iterations}, max_queries={max_queries}")
+        print(f"  Note: Decision-based attacks require MANY queries (often thousands).")
+        print(f"        This is the most restrictive attack - only uses hard labels (detected/not detected).")
+        attacker = DecisionBased(model, processor, iterations=boundary_iterations,
+                                initial_num_evals=100, max_num_evals=max_queries,
+                                step_adapt=0.9, spherical_step_size=0.01, source_step_size=0.01,
+                                target_class=target_class)
     else:
         print(f"Unknown attack method: {attack_method}")
         return
@@ -1168,14 +1448,14 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
 def main():
     parser = argparse.ArgumentParser(description='SAM3 Adversarial Attack Framework')
     parser.add_argument('--attack', type=str, default='all', 
-                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker', 'scorebased', 'all'],
-                       help='Attack method: fgsm, pgd/pgm, cw, sticker, scorebased, or all (default: all)')
+                       choices=['fgsm', 'pgd', 'pgm', 'cw', 'sticker', 'scorebased', 'decision', 'all'],
+                       help='Attack method: fgsm, pgd/pgm, cw, sticker, scorebased, decision, or all (default: all)')
     parser.add_argument('--image', type=str, default='data/cat.jpg',
                        help='Path to input image')
     parser.add_argument('--prompt', type=str, default='cat',
                        help='Text prompt for detection (source class)')
     parser.add_argument('--target', type=str, default=None,
-                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with C&W, sticker, and score-based attacks.')
+                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with C&W, sticker, score-based, and decision-based attacks.')
     parser.add_argument('--output-dir', type=str, default='adversarial_results',
                        help='Output directory for results')
     parser.add_argument('--epsilon', type=float, default=0.1,
@@ -1196,23 +1476,23 @@ def main():
     
     # Determine which attacks to run
     if args.attack == 'all':
-        attacks_to_run = ['fgsm', 'pgd', 'cw', 'sticker', 'scorebased']
+        attacks_to_run = ['fgsm', 'pgd', 'cw', 'sticker', 'scorebased', 'decision']
     else:
         attacks_to_run = [args.attack]
     
     # Validate targeted attack
     if args.target:
         for attack in attacks_to_run:
-            if attack not in ['cw', 'sticker', 'scorebased']:
-                print(f"WARNING: Targeted attacks (--target) only supported for C&W, sticker, and score-based attacks.")
+            if attack not in ['cw', 'sticker', 'scorebased', 'decision']:
+                print(f"WARNING: Targeted attacks (--target) only supported for C&W, sticker, score-based, and decision-based attacks.")
                 print(f"         Will skip targeted mode for {attack.upper()}.")
         # Filter to only attacks that support targeting
         if args.attack == 'all':
-            attacks_to_run_with_target = ['cw', 'sticker', 'scorebased']
+            attacks_to_run_with_target = ['cw', 'sticker', 'scorebased', 'decision']
             attacks_to_run_without_target = [a for a in attacks_to_run if a not in attacks_to_run_with_target]
         else:
-            attacks_to_run_with_target = [a for a in attacks_to_run if a in ['cw', 'sticker', 'scorebased']]
-            attacks_to_run_without_target = [a for a in attacks_to_run if a not in ['cw', 'sticker', 'scorebased']]
+            attacks_to_run_with_target = [a for a in attacks_to_run if a in ['cw', 'sticker', 'scorebased', 'decision']]
+            attacks_to_run_without_target = [a for a in attacks_to_run if a not in ['cw', 'sticker', 'scorebased', 'decision']]
     else:
         attacks_to_run_with_target = []
         attacks_to_run_without_target = attacks_to_run
