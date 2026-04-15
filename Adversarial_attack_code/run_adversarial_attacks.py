@@ -694,11 +694,18 @@ class AdversarialSticker(AdversarialAttacker):
 
 
 class ScoreBased(AdversarialAttacker):
-    """Score-Based Attack using Natural Evolution Strategies (NES) for gradient estimation
+    """Score-Based Attack using Central Difference (Antithetic Sampling) for gradient estimation
     
     This is a black-box attack that only requires access to model output scores (logits/probabilities),
-    not gradients. It estimates gradients by sampling random perturbations and using the model's
-    output scores to compute a weighted combination that approximates the true gradient direction.
+    not gradients. It estimates gradients using finite differences with antithetic samples:
+    
+    For each random direction u, we evaluate:
+    - L_plus = f(x + σu)
+    - L_minus = f(x - σu)  
+    - gradient ≈ (L_plus - L_minus) * u / (2σ)
+    
+    This central difference approach reduces variance and provides more accurate gradient estimates
+    compared to one-sided differences. Each iteration requires 2*num_samples model queries.
     """
     
     def __init__(self, model, processor, epsilon=0.1, iterations=50, num_samples=20, 
@@ -713,84 +720,99 @@ class ScoreBased(AdversarialAttacker):
         
     def estimate_gradient_nes(self, image_tensor, target_prompt):
         """
-        Estimate gradient using Natural Evolution Strategies (NES)
+        Estimate gradient using Central Difference (Antithetic Sampling)
         
-        NES samples random directions, evaluates the loss in those directions,
-        and computes a weighted average to approximate the gradient.
+        This method uses finite differences with antithetic samples for more accurate
+        gradient estimation. For each random direction u, we evaluate:
+        - L_plus = f(x + σu)  
+        - L_minus = f(x - σu)
+        - gradient ≈ (L_plus - L_minus) * u / (2σ)
+        
+        This antithetic approach reduces variance compared to one-sided differences.
+        
+        IMPORTANT: Uses MAX confidence (not mean) to match the actual decision boundary.
+        While noisier, this correctly targets what the detector actually uses.
         
         For UNTARGETED attacks: We want to DECREASE detection confidence.
-        So we define attack_success = -detection_confidence (higher = better attack)
+        So we define attack_success = -log(max_detection_confidence)
         
         Args:
             image_tensor: Current adversarial image tensor
             target_prompt: Text prompt for detection
             
         Returns:
-            gradient_estimate: Approximation of the gradient
+            gradient_estimate: Approximation of the gradient using central differences
         """
         # Sample random perturbation directions from Gaussian distribution
         # Shape: (num_samples, channels, height, width)
+        # Note: We'll use each sample for both +σu and -σu (antithetic pairs)
         perturbations = torch.randn(
             self.num_samples, *image_tensor.shape[1:], 
             device=self.device
         )
         
-        # Evaluate attack success for each perturbed sample
-        # Higher success = better attack = lower detection
-        attack_scores = []
+        gradient_estimate = torch.zeros_like(image_tensor)
         
+        # Evaluate attack success for each antithetic pair
         for i in range(self.num_samples):
-            # Apply perturbation
-            perturbed = image_tensor + self.sigma * perturbations[i:i+1]
-            perturbed = torch.clamp(perturbed, -1, 1)
+            u = perturbations[i:i+1]
             
-            # Compute attack success score (no gradients needed - score-based only)
+            # Evaluate at x + σu (forward perturbation)
+            perturbed_plus = image_tensor + self.sigma * u
+            perturbed_plus = torch.clamp(perturbed_plus, -1, 1)
+            
+            # Evaluate at x - σu (backward perturbation)
+            perturbed_minus = image_tensor - self.sigma * u
+            perturbed_minus = torch.clamp(perturbed_minus, -1, 1)
+            
+            # Compute attack success scores (no gradients needed - score-based only)
             with torch.no_grad():
                 if self.target_class:
                     # For targeted: minimize source, maximize target
-                    _, src_out, tgt_out = self.compute_targeted_loss(
-                        perturbed, target_prompt, self.target_class
+                    # Evaluate at x + σu
+                    _, src_out_plus, tgt_out_plus = self.compute_targeted_loss(
+                        perturbed_plus, target_prompt, self.target_class
                     )
-                    src_conf = src_out["pred_logits"].sigmoid().max().item()
-                    tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
-                    # Attack success using log-loss formulation (like cross-entropy)
-                    # Higher = better attack
-                    score = -torch.log(torch.tensor(src_conf + 1e-10)).item() + torch.log(torch.tensor(tgt_conf + 1e-10)).item()
+                    # Use MAX confidence to match the actual decision boundary
+                    src_conf_plus = src_out_plus["pred_logits"].sigmoid().max().item()
+                    tgt_conf_plus = tgt_out_plus["pred_logits"].sigmoid().max().item()
+                    score_plus = -torch.log(torch.tensor(src_conf_plus + 1e-10)).item() + \
+                                 torch.log(torch.tensor(tgt_conf_plus + 1e-10)).item()
+                    
+                    # Evaluate at x - σu
+                    _, src_out_minus, tgt_out_minus = self.compute_targeted_loss(
+                        perturbed_minus, target_prompt, self.target_class
+                    )
+                    src_conf_minus = src_out_minus["pred_logits"].sigmoid().max().item()
+                    tgt_conf_minus = tgt_out_minus["pred_logits"].sigmoid().max().item()
+                    score_minus = -torch.log(torch.tensor(src_conf_minus + 1e-10)).item() + \
+                                  torch.log(torch.tensor(tgt_conf_minus + 1e-10)).item()
                 else:
                     # For untargeted: minimize detection
-                    # Use negative log-probability (like cross-entropy loss)
-                    _, outputs = self.compute_loss(perturbed, target_prompt)
-                    detection_conf = outputs["pred_logits"].sigmoid().max().item()
-                    # Attack success = -log(detection_confidence)
-                    # When detection_conf is high (0.95), score is low (-0.05)
-                    # When detection_conf is low (0.1), score is high (-(-2.3) = 2.3)
-                    # Higher score = better attack
-                    score = -torch.log(torch.tensor(detection_conf + 1e-10)).item()
-                
-                attack_scores.append(score)
+                    # Use MAX confidence to match the actual decision boundary
+                    # This is noisier but matches what we're actually trying to fool
+                    _, outputs_plus = self.compute_loss(perturbed_plus, target_prompt)
+                    detection_conf_plus = outputs_plus["pred_logits"].sigmoid().max().item()
+                    score_plus = -torch.log(torch.tensor(detection_conf_plus + 1e-10)).item()
+                    
+                    # Evaluate at x - σu
+                    _, outputs_minus = self.compute_loss(perturbed_minus, target_prompt)
+                    detection_conf_minus = outputs_minus["pred_logits"].sigmoid().max().item()
+                    score_minus = -torch.log(torch.tensor(detection_conf_minus + 1e-10)).item()
+            
+            # Central difference: gradient ≈ (L_plus - L_minus) * u / (2σ)
+            # Higher score = better attack, so we want to move in direction of score increase
+            score_difference = score_plus - score_minus
+            gradient_estimate += score_difference * u
         
-        # Convert to tensor
-        scores_tensor = torch.tensor(attack_scores, device=self.device)
+        # Average over all samples and scale by 1/(2σ) for central difference
+        gradient_estimate = gradient_estimate / (self.num_samples * 2 * self.sigma)
         
-        # Debug: print score statistics
+        # Debug: print gradient statistics
         if torch.rand(1).item() < 0.1:  # Print 10% of the time to avoid spam
-            print(f"      [NES Debug] Score range: [{scores_tensor.min().item():.4f}, {scores_tensor.max().item():.4f}], "
-                  f"mean: {scores_tensor.mean().item():.4f}, std: {scores_tensor.std().item():.6f}")
-        
-        # Standard NES with baseline subtraction
-        # Directions with higher-than-average attack success get positive weight
-        scores_mean = scores_tensor.mean()
-        scores_centered = scores_tensor - scores_mean
-        
-        # Estimate gradient: directions with better attack scores (higher) contribute positively
-        # Formula: ĝ ≈ (1/Nσ) Σ (score_k - score_mean) * u_k
-        gradient_estimate = torch.zeros_like(image_tensor)
-        
-        for i in range(self.num_samples):
-            gradient_estimate += scores_centered[i] * perturbations[i:i+1]
-        
-        # Scale by (1 / (N * sigma)) as per NES formula
-        gradient_estimate = gradient_estimate / (self.num_samples * self.sigma)
+            grad_norm = torch.norm(gradient_estimate).item()
+            grad_max = torch.abs(gradient_estimate).max().item()
+            print(f"      [Central Diff Debug] GradNorm: {grad_norm:.6f}, GradMax: {grad_max:.6f}")
         
         return gradient_estimate
     
@@ -814,10 +836,10 @@ class ScoreBased(AdversarialAttacker):
         if self.target_class:
             print(f"  Running TARGETED Score-Based attack with {self.iterations} iterations...")
             print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
-            print(f"  Using {self.num_samples} samples per gradient estimation")
+            print(f"  Using {self.num_samples} antithetic samples per gradient estimation (central differences)")
         else:
             print(f"  Running Score-Based attack with {self.iterations} iterations...")
-            print(f"  Using {self.num_samples} samples per gradient estimation")
+            print(f"  Using {self.num_samples} antithetic samples per gradient estimation (central differences)")
         
         best_perturbation = None
         best_score = float('-inf')  # Track HIGHEST attack success score
@@ -826,9 +848,9 @@ class ScoreBased(AdversarialAttacker):
         total_queries = 0
         
         for i in range(self.iterations):
-            # Estimate gradient using NES (requires num_samples queries)
+            # Estimate gradient using central differences (requires 2*num_samples queries)
             gradient_estimate = self.estimate_gradient_nes(perturbed_tensor, target_prompt)
-            total_queries += self.num_samples
+            total_queries += 2 * self.num_samples  # Both +σu and -σu for each sample
             
             # Debug: check gradient magnitude
             grad_norm = torch.norm(gradient_estimate).item()
@@ -859,11 +881,13 @@ class ScoreBased(AdversarialAttacker):
                     _, src_out, tgt_out = self.compute_targeted_loss(
                         perturbed_tensor, target_prompt, self.target_class
                     )
+                    # Use max to match decision boundary
                     src_conf = src_out["pred_logits"].sigmoid().max().item()
                     tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
                     current_score = -torch.log(torch.tensor(src_conf + 1e-10)).item() + torch.log(torch.tensor(tgt_conf + 1e-10)).item()
                 else:
                     _, outputs = self.compute_loss(perturbed_tensor, target_prompt)
+                    # Use max confidence to match the actual decision boundary
                     detection_conf = outputs["pred_logits"].sigmoid().max().item()
                     current_score = -torch.log(torch.tensor(detection_conf + 1e-10)).item()
                 
@@ -1268,14 +1292,18 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
                                      c=10.0, iterations=200, learning_rate=0.1, 
                                      target_class=target_class)
     elif attack_method.lower() == 'scorebased':
-        # Score-based attack using Natural Evolution Strategies (NES)
+        # Score-based attack using Central Differences (Antithetic Sampling)
         # Query-efficient black-box attack that only needs model output scores
-        num_samples = 100  # Increased for more accurate gradient estimates
-        sigma = 0.2  # Larger sampling radius for stronger signal (was 0.1)
-        lr_scorebased = 0.05  # Larger step size for more aggressive updates (was 0.01)
-        print(f"  Score-based attack parameters: samples={num_samples}, sigma={sigma}, lr={lr_scorebased}")
-        print(f"  Note: Score-based attacks are query-intensive. Using {num_samples} samples per iteration.")
-        attacker = ScoreBased(model, processor, epsilon=epsilon, iterations=iterations,
+        num_samples = 100  # Good for accurate gradient estimates
+        sigma = 0.01  # REDUCED: Smaller perturbations for better gradient approximation
+        lr_scorebased = 0.05  # Step size for updates
+        # Increase iterations for better convergence
+        iterations_scorebased = max(50, iterations * 5)  # At least 50 iterations
+        print(f"  Score-based attack parameters: samples={num_samples}, sigma={sigma}, lr={lr_scorebased}, iterations={iterations_scorebased}")
+        print(f"  Note: Score-based attacks are query-intensive. Using {num_samples} antithetic pairs per iteration.")
+        print(f"        Central differences: gradient ≈ (f(x+σu) - f(x-σu)) * u / (2σ)")
+        print(f"        Using MAX confidence (matches decision boundary, though noisier)")
+        attacker = ScoreBased(model, processor, epsilon=epsilon, iterations=iterations_scorebased,
                              num_samples=num_samples, sigma=sigma, learning_rate=lr_scorebased,
                              target_class=target_class)
     elif attack_method.lower() == 'decision':
@@ -1470,7 +1498,7 @@ def main():
                        choices=['center', 'random', 'top-left', 'top-right', 'bottom-left', 'bottom-right'],
                        help='Location to place adversarial sticker (sticker attack only)')
     parser.add_argument('--max-size', type=int, default=None,
-                       help='Maximum image dimension (if set, images larger than this will be downsampled to prevent OOM errors)')
+                       help='Maximum image dimension (if set, images larger than this will be downsampled to prevent OOM errors). Recommended: 1024 for score-based attacks on large images.')
     
     args = parser.parse_args()
     
