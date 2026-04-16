@@ -12,7 +12,6 @@ from torchvision.models import resnet18, ResNet18_Weights
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 import os
-import sys
 import argparse
 import numpy as np
 
@@ -368,49 +367,55 @@ class AdversarialSticker_ResNet(ResNetAdversarialAttacker):
         return adversarial_image, sticker_image, best_loss
 
 
-def visualize_results(original_img, adversarial_img, original_preds, adv_preds, 
-                     attack_name, output_name, perturbation=None, amplify_factor=1.0):
-    """Visualize attack results"""
-    fig, axes = plt.subplots(1, 3 if perturbation is not None else 2, 
-                            figsize=(15 if perturbation is not None else 10, 5))
+def _top5_label(preds):
+    """Format a top-5 prediction list as a multi-line string."""
+    lines = ["Top-5 Predictions:"]
+    for i, p in enumerate(preds):
+        lines.append(f"  {i+1}. {p['class']}: {p['confidence']*100:.1f}%")
+    return "\n".join(lines)
+
+def visualize_results(original_img, adversarial_img, original_preds, adv_preds,
+                      attack_name, output_name):
+    """Visualize attack results with extra spacing between title and content."""
     
+    fig, axes = plt.subplots(1, 2, figsize=(14, 8))  # slightly taller figure
+
+    # ── Original image ────────────────────────────────────────────────────────
     axes[0].imshow(original_img)
-    axes[0].set_title(f"Original\n{original_preds[0]['class']}\n"
-                     f"{original_preds[0]['confidence']*100:.1f}% confidence",
-                     fontsize=12)
+    axes[0].set_title(
+        f"Original\n\n{_top5_label(original_preds)}",
+        fontsize=10,
+        loc='left',
+        family='monospace',
+        pad=18  # ↑ more space above subplot text
+    )
     axes[0].axis('off')
-    
+
+    # ── Adversarial image ─────────────────────────────────────────────────────
     axes[1].imshow(adversarial_img)
-    axes[1].set_title(f"After {attack_name}\n{adv_preds[0]['class']}\n"
-                     f"{adv_preds[0]['confidence']*100:.1f}% confidence",
-                     fontsize=12)
+    axes[1].set_title(
+        f"After {attack_name}\n\n{_top5_label(adv_preds)}",
+        fontsize=10,
+        loc='left',
+        family='monospace',
+        pad=18
+    )
     axes[1].axis('off')
-    
-    if perturbation is not None:
-        pert_np = perturbation.squeeze().cpu().detach().numpy()
-        pert_vis = np.transpose(pert_np, (1, 2, 0))
-        
-        if amplify_factor == 1.0:
-            pert_vis = np.clip((pert_vis * 0.5) + 0.5, 0, 1)
-            title_suffix = "(raw, no amplification)"
-        else:
-            if amplify_factor < 0:
-                pert_vis = (pert_vis - pert_vis.min()) / (pert_vis.max() - pert_vis.min() + 1e-8)
-                title_suffix = "(auto-scaled)"
-            else:
-                pert_vis = np.clip((pert_vis * amplify_factor) + 0.5, 0, 1)
-                title_suffix = f"(amplified {amplify_factor}x)"
-        
-        axes[2].imshow(pert_vis)
-        axes[2].set_title(f"Perturbation\n{title_suffix}", fontsize=12)
-        axes[2].axis('off')
-    
-    plt.suptitle(f"{attack_name} Attack Results", fontsize=16, fontweight='bold')
-    plt.tight_layout()
+
+    # Main title — push it higher
+    plt.suptitle(
+        f"{attack_name} Attack Results",
+        fontsize=16,
+        fontweight='bold',
+        y=1.02  # ↑ higher than before
+    )
+
+    # Reserve even more space at the top
+    plt.tight_layout(rect=[0, 0, 1, 0.88])  # ↓ shrink plotting area
+
     plt.savefig(output_name, dpi=150, bbox_inches='tight')
     print(f"  Saved visualization: {output_name}")
     plt.close()
-
 
 def run_attack(attack_name, model, device, args, original_image, source_class,
                target_class_idx, original_preds, output_dir, image_name):
@@ -471,9 +476,8 @@ def run_attack(attack_name, model, device, args, original_image, source_class,
     # Save visualization
     viz_path = os.path.join(output_dir, f"{image_name}_{attack_name}_comparison.png")
     visualize_results(original_image, adversarial_image,
-                      original_preds, adv_preds,
-                      attack_name.upper(), viz_path, perturbation,
-                      amplify_factor=args.amplify_perturbation)
+                    original_preds, adv_preds,
+                    attack_name.upper(), viz_path)
 
     summary = {
         'attack': attack_name,
@@ -490,25 +494,6 @@ def run_attack(attack_name, model, device, args, original_image, source_class,
     print(f"  Memory cleared after {attack_name.upper()} attack.")
 
     return summary
-
-
-class Tee:
-    """Mirrors stdout to both the console and a log file simultaneously."""
-
-    def __init__(self, log_path):
-        self.terminal = sys.stdout
-        self.log = open(log_path, 'w', buffering=1)
-
-    def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
-
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
-
-    def close(self):
-        self.log.close()
 
 
 def main():
@@ -528,9 +513,9 @@ def main():
     parser.add_argument('--patch-location', type=str, default='center',
                        choices=['center', 'top-left', 'top-right', 'bottom-left', 'bottom-right'],
                        help='Sticker location')
-    parser.add_argument('--amplify-perturbation', type=float, default=1.0,
-                       help='Amplification factor for perturbation visualization '
-                            '(1.0=no amplification, -1=auto-scale, >1=amplify by factor)')
+    # parser.add_argument('--amplify-perturbation', type=float, default=1.0,
+    #                    help='Amplification factor for perturbation visualization '
+    #                         '(1.0=no amplification, -1=auto-scale, >1=amplify by factor)')
 
     args = parser.parse_args()
 
@@ -558,12 +543,6 @@ def main():
     image_name = os.path.splitext(os.path.basename(args.image))[0]
     output_dir = os.path.join(args.output_dir, image_name)
     os.makedirs(output_dir, exist_ok=True)
-
-    # Mirror all stdout to a log file in the output directory
-    log_path = os.path.join(output_dir, f"{image_name}_log.txt")
-    tee = Tee(log_path)
-    sys.stdout = tee
-    print(f"Logging output to: {log_path}")
 
     # Get original prediction using a base attacker instance
     base_attacker = ResNetAdversarialAttacker(model, device)
@@ -622,11 +601,6 @@ def main():
               f"({s['adv_confidence']*100:.1f}%)  {status}")
 
     print(f"{'=' * 60}\n")
-
-    # Restore stdout and close the log file
-    sys.stdout = tee.terminal
-    tee.close()
-    print(f"Log saved to: {log_path}")
 
 
 if __name__ == "__main__":

@@ -46,7 +46,6 @@ python resnet_adversarial_framework.py \
   --target-class "golden retriever" \
   --patch-size 64 \
   --patch-location top-left \
-  --amplify-perturbation 10
 ```
 
 ---
@@ -62,17 +61,9 @@ python resnet_adversarial_framework.py \
 | `--target-class` | `None` | ImageNet class name to target (e.g. `"tabby"`) — runs a targeted attack |
 | `--patch-size` | `50` | Width/height in pixels of the adversarial sticker patch |
 | `--patch-location` | `center` | Where to place the sticker patch on the image |
-| `--amplify-perturbation` | `1.0` | How to visualize the perturbation (see below) |
 
 ### `--patch-location` options
 `center`, `top-left`, `top-right`, `bottom-left`, `bottom-right`
-
-### `--amplify-perturbation` values
-| Value | Effect |
-|---|---|
-| `1.0` | Raw perturbation, no amplification (default) |
-| `-1` | Auto-scale to fill the full visual range |
-| `> 1` | Manually amplify by that factor (e.g. `10` = 10× brighter) |
 
 ---
 

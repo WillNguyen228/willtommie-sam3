@@ -114,10 +114,49 @@ def apply_defenses(image: Image.Image, techniques: list) -> Image.Image:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Comparison visualisation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_comparison(before: Image.Image, after: Image.Image,
+                    techniques: list, output_path: str) -> None:
+    """
+    Save a two-panel comparison figure:
+      Left  – adversarial image before any defense
+      Right – image after defense preprocessing
+
+    The applied techniques are shown in the title.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+    # ── Before (adversarial input) ───────────────────────────────────────────
+    axes[0].imshow(before.convert("RGB"))
+    axes[0].set_title("Before Defense\n(adversarial input)", fontsize=11)
+    axes[0].axis("off")
+
+    # ── After (defended output) ──────────────────────────────────────────────
+    axes[1].imshow(after.convert("RGB"))
+    axes[1].set_title("After Defense\n(preprocessed output)", fontsize=11)
+    axes[1].axis("off")
+
+    # ── Title with techniques ────────────────────────────────────────────────
+    technique_label = "Techniques applied: " + ", ".join(techniques)
+    plt.suptitle(technique_label, fontsize=12, fontweight="bold")
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Model runners
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_resnet(image: Image.Image, image_name: str, output_dir: str, run_num: int):
+def run_resnet(image: Image.Image, image_name: str, output_dir: str,
+               run_num: int, techniques: list):
     """Run preprocessed image through ResNet-18 and save results."""
     import torch
     import torch.nn.functional as F
@@ -161,15 +200,16 @@ def run_resnet(image: Image.Image, image_name: str, output_dir: str, run_num: in
     for i, p in enumerate(predictions):
         print(f"        {i+1}. {p['class']}: {p['confidence']*100:.1f}%")
 
-    # Save result image with prediction overlay
+    # Save result image with prediction overlay and techniques listed
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.imshow(image)
     ax.axis("off")
-    label = "\n".join(
+    pred_label = "\n".join(
         f"{i+1}. {p['class']}: {p['confidence']*100:.1f}%"
         for i, p in enumerate(predictions)
     )
-    ax.set_title(f"Defense result\n{label}", fontsize=9, loc="left")
+    technique_label = "Defenses: " + ", ".join(techniques)
+    ax.set_title(f"{technique_label}\n\n{pred_label}", fontsize=9, loc="left")
     plt.tight_layout()
     out_path = os.path.join(output_dir, f"{image_name}_defense_result_{run_num}.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -183,7 +223,8 @@ def run_resnet(image: Image.Image, image_name: str, output_dir: str, run_num: in
     return predictions
 
 
-def run_sam3(image: Image.Image, prompt: str, image_name: str, output_dir: str, run_num: int):
+def run_sam3(image: Image.Image, prompt: str, image_name: str,
+             output_dir: str, run_num: int, techniques: list):
     """Run preprocessed image through SAM3 and save results."""
     import torch
     import matplotlib
@@ -211,6 +252,9 @@ def run_sam3(image: Image.Image, prompt: str, image_name: str, output_dir: str, 
         print(f"      No '{prompt}' detected.")
 
     plot_results(image, inference_state)
+    # Append techniques as a subtitle under the existing plot
+    technique_label = "Defenses: " + ", ".join(techniques)
+    plt.suptitle(technique_label, fontsize=9, y=0.02)
     out_path = os.path.join(output_dir, f"{image_name}_defense_result_{run_num}.png")
     plt.savefig(out_path, bbox_inches="tight", dpi=150)
     plt.close()
@@ -378,19 +422,19 @@ def main():
         print(f"  Applying defenses: {', '.join(techniques)}")
         defended = apply_defenses(image, techniques)
 
-        # Save the preprocessed image for reference (also versioned)
-        preprocessed_path = os.path.join(output_dir,
-                                         f"{stem}_preprocessed_{run_num}.png")
-        defended.save(preprocessed_path)
-        print(f"    Saved preprocessed image: {preprocessed_path}")
+        # Save three-panel before/diff/after comparison
+        comparison_path = os.path.join(output_dir,
+                                       f"{stem}_comparison_{run_num}.png")
+        save_comparison(image, defended, techniques, comparison_path)
+        print(f"    Saved comparison image: {comparison_path}")
 
         # Run model
         print(f"  Running {args.model_type.upper()} inference...")
         try:
             if args.model_type == "resnet":
-                run_resnet(defended, stem, output_dir, run_num)
+                run_resnet(defended, stem, output_dir, run_num, techniques)
             else:  # sam3
-                run_sam3(defended, class_name, stem, output_dir, run_num)
+                run_sam3(defended, class_name, stem, output_dir, run_num, techniques)
         except Exception as e:
             print(f"    ERROR during inference: {e}")
             import traceback
