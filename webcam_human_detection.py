@@ -124,18 +124,18 @@ def main():
                 
                 # Reset prompts and segment with text prompt "person" or "human"
                 processor.reset_all_prompts(inference_state)
-                output = processor.set_ and scale boxes back to original size
-                boxes = output.get("boxes", None)
-                scores = output.get("scores", [])
-                
-                # Scale boxes back to original frame size
-                if boxes is not None and len(boxes) > 0:
-                    boxes = boxes / scaleso try "human", "man", "woman", "people"
+                output = processor.set_text_prompt(
+                    state=inference_state, 
+                    prompt="person"  # You can also try "human", "man", "woman", "people"
                 )
                 
                 # Get detection results
                 boxes = output.get("boxes", None)
                 scores = output.get("scores", [])
+                
+                # Scale boxes back to original frame size
+                if boxes is not None and len(boxes) > 0:
+                    boxes = boxes / scale
                 
                 last_detection_time = current_time
                 
@@ -145,7 +145,11 @@ def main():
                     if num_detections > 0:
                         print(f"Frame {frame_count}: Detected {num_detections} person(s)")
             
-            # Draw detect and detection interval
+            # Draw detections on frame
+            if boxes is not None and len(boxes) > 0:
+                frame = draw_detections(frame, boxes, scores, confidence_threshold=0.3)
+            
+            # Display FPS and detection interval
             actual_fps = 1.0 / detection_interval
             fps_text = f"Detection FPS: {actual_fps:.1f}"
             cv2.putText(frame, fps_text, (10, 30), 
@@ -177,11 +181,7 @@ def main():
             elif key == ord('-') or key == ord('_'):
                 # Decrease detection speed (increase interval)
                 detection_interval = min(2.0, detection_interval + 0.05)
-                print(f"Detection interval: {detection_interval:.2f}s ({1.0/detection_interval:.1f} FPS)")rame
-                filename = f"human_detection_{saved_count:03d}.jpg"
-                cv2.imwrite(filename, frame)
-                print(f"✓ Saved: {filename}")
-                saved_count += 1
+                print(f"Detection interval: {detection_interval:.2f}s ({1.0/detection_interval:.1f} FPS)")
     
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")

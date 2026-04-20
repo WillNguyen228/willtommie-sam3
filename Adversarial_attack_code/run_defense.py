@@ -276,6 +276,8 @@ ADVERSARIAL_SUFFIXES = [
     "_adversarial_pgd.png",
     "_adversarial_cw.png",
     "_adversarial_sticker.png",
+    "_adversarial_scorebased.png",
+    "_adversarial_decision.png",
 ]
 
 ALL_TECHNIQUES = ["denoise", "resize", "jpeg"]
@@ -284,7 +286,7 @@ ALL_TECHNIQUES = ["denoise", "resize", "jpeg"]
 def find_adversarial_images(directory: str) -> list:
     """
     Return a list of (file_path, base_stem) for every adversarial image found
-    in *directory*.  Looks for files ending in the four known attack suffixes.
+    in *directory*.  Looks for files ending in the known attack suffixes.
     """
     found = []
     for fname in sorted(os.listdir(directory)):
@@ -390,7 +392,7 @@ def main():
     adv_images = find_adversarial_images(args.directory)
     if not adv_images:
         print(f"No adversarial images found in '{args.directory}'.")
-        print("Expected files matching patterns like: *_adversarial_fgsm.png, etc.")
+        print("Expected files matching patterns like: *_adversarial_fgsm.png, *_adversarial_scorebased.png, etc.")
         sys.exit(1)
 
     # ── Banner ────────────────────────────────────────────────────────────────

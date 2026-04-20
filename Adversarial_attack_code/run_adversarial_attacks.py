@@ -188,16 +188,17 @@ class AdversarialAttacker:
 class FGSM(AdversarialAttacker):
     """Fast Gradient Sign Method"""
     
-    def __init__(self, model, processor, epsilon=0.03, device="cuda"):
+    def __init__(self, model, processor, epsilon=0.03, target_class=None, device="cuda"):
         super().__init__(model, processor, device)
         self.epsilon = epsilon
+        self.target_class = target_class
         
     def attack(self, image, target_prompt):
         """
         Perform FGSM attack
         Args:
             image: PIL Image
-            target_prompt: text prompt for detection
+            target_prompt: text prompt for detection (source class for targeted attack)
         Returns:
             adversarial_image: PIL Image with adversarial perturbation
             perturbation: the actual perturbation added
@@ -208,8 +209,16 @@ class FGSM(AdversarialAttacker):
         # Enable gradients
         image_tensor.requires_grad = True
         
-        # Compute loss
-        loss, original_outputs = self.compute_loss(image_tensor, target_prompt)
+        if self.target_class:
+            print(f"  Running TARGETED FGSM attack")
+            print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
+            # Compute loss for targeted attack
+            loss, source_outputs, target_outputs = self.compute_targeted_loss(
+                image_tensor, target_prompt, self.target_class
+            )
+        else:
+            # Compute loss for untargeted attack
+            loss, original_outputs = self.compute_loss(image_tensor, target_prompt)
         
         # Backward pass
         self.model.zero_grad()
@@ -223,8 +232,8 @@ class FGSM(AdversarialAttacker):
         torch.cuda.empty_cache()
         
         # Create perturbation: epsilon * sign(gradient)
-        # For untargeted attack, we want to go in direction of gradient to maximize loss
-        perturbation = self.epsilon * gradient.sign()
+        # Use gradient descent (subtract gradient) to minimize loss
+        perturbation = -self.epsilon * gradient.sign()
         
         # Apply perturbation
         perturbed_tensor = self.apply_perturbation(image_tensor.detach(), perturbation, self.epsilon)
@@ -238,18 +247,19 @@ class FGSM(AdversarialAttacker):
 class PGD(AdversarialAttacker):
     """Projected Gradient Descent (iterative FGSM)"""
     
-    def __init__(self, model, processor, epsilon=0.03, alpha=0.01, iterations=10, device="cuda"):
+    def __init__(self, model, processor, epsilon=0.03, alpha=0.01, iterations=10, target_class=None, device="cuda"):
         super().__init__(model, processor, device)
         self.epsilon = epsilon
         self.alpha = alpha
         self.iterations = iterations
+        self.target_class = target_class
         
     def attack(self, image, target_prompt):
         """
         Perform PGD attack
         Args:
             image: PIL Image
-            target_prompt: text prompt for detection
+            target_prompt: text prompt for detection (source class for targeted attack)
         Returns:
             adversarial_image: PIL Image with adversarial perturbation
             perturbation: the actual perturbation added
@@ -258,13 +268,23 @@ class PGD(AdversarialAttacker):
         original_tensor, original_size = self.preprocess_image(image)
         perturbed_tensor = original_tensor.clone().detach()
         
-        print(f"  Running PGD attack with {self.iterations} iterations...")
+        if self.target_class:
+            print(f"  Running TARGETED PGD attack with {self.iterations} iterations...")
+            print(f"  Source class: '{target_prompt}' -> Target class: '{self.target_class}'")
+        else:
+            print(f"  Running PGD attack with {self.iterations} iterations...")
         
         for i in range(self.iterations):
             perturbed_tensor.requires_grad = True
             
-            # Compute loss
-            loss, _ = self.compute_loss(perturbed_tensor, target_prompt)
+            if self.target_class:
+                # Compute loss for targeted attack
+                loss, source_outputs, target_outputs = self.compute_targeted_loss(
+                    perturbed_tensor, target_prompt, self.target_class
+                )
+            else:
+                # Compute loss for untargeted attack
+                loss, _ = self.compute_loss(perturbed_tensor, target_prompt)
             
             # Backward pass
             self.model.zero_grad()
@@ -279,8 +299,8 @@ class PGD(AdversarialAttacker):
             
             # Update perturbation
             with torch.no_grad():
-                # Take a step in the direction of gradient
-                perturbed_tensor = perturbed_tensor.detach() + self.alpha * gradient.sign()
+                # Use gradient descent (subtract gradient) to minimize loss
+                perturbed_tensor = perturbed_tensor.detach() - self.alpha * gradient.sign()
                 
                 # Project back to epsilon ball around original image
                 perturbation = torch.clamp(
@@ -294,7 +314,18 @@ class PGD(AdversarialAttacker):
                 )
             
             if (i + 1) % 2 == 0:
-                print(f"    Iteration {i+1}/{self.iterations}, Loss: {loss.item():.4f}")
+                if self.target_class:
+                    # For targeted attacks, show source and target confidences
+                    with torch.no_grad():
+                        _, src_out, tgt_out = self.compute_targeted_loss(
+                            perturbed_tensor, target_prompt, self.target_class
+                        )
+                        src_conf = src_out["pred_logits"].sigmoid().max().item()
+                        tgt_conf = tgt_out["pred_logits"].sigmoid().max().item()
+                        print(f"    Iteration {i+1}/{self.iterations}, Loss: {loss.item():.4f}, "
+                              f"SrcMax: {src_conf:.4f}, TgtMax: {tgt_conf:.4f}")
+                else:
+                    print(f"    Iteration {i+1}/{self.iterations}, Loss: {loss.item():.4f}")
         
         # Convert back to PIL and resize to original dimensions
         adversarial_image = self.tensor_to_pil(perturbed_tensor, original_size)
@@ -419,10 +450,18 @@ class CW(AdversarialAttacker):
             frequency_loss = self.compute_frequency_loss(perturbation)
             
             # Combined loss: C&W formulation with perceptual improvements
-            total_loss = (l2_dist + 
-                         self.c * detection_loss + 
-                         self.perceptual_weight * perceptual_loss + 
-                         self.frequency_weight * frequency_loss)
+            # For untargeted: negate detection_loss (since compute_loss returns negative values)
+            # For targeted: use detection_loss as-is (compute_targeted_loss is correct)
+            if self.target_class:
+                total_loss = (l2_dist + 
+                             self.c * detection_loss + 
+                             self.perceptual_weight * perceptual_loss + 
+                             self.frequency_weight * frequency_loss)
+            else:
+                total_loss = (l2_dist - 
+                             self.c * detection_loss + 
+                             self.perceptual_weight * perceptual_loss + 
+                             self.frequency_weight * frequency_loss)
             
             # Optimization step
             optimizer.zero_grad()
@@ -632,7 +671,12 @@ class AdversarialSticker(AdversarialAttacker):
                       torch.sum(torch.abs(patch[:, :, :-1, :] - patch[:, :, 1:, :])))
             
             # Combined loss
-            total_loss = self.c * detection_loss + 0.01 * patch_norm + 0.001 * tv_loss
+            # For untargeted: negate detection_loss (since compute_loss returns negative values)
+            # For targeted: use detection_loss as-is (compute_targeted_loss is correct)
+            if self.target_class:
+                total_loss = self.c * detection_loss + 0.01 * patch_norm + 0.001 * tv_loss
+            else:
+                total_loss = -self.c * detection_loss + 0.01 * patch_norm + 0.001 * tv_loss
             
             # Optimization step
             optimizer.zero_grad()
@@ -1267,11 +1311,11 @@ def test_adversarial_attack(attack_method, image_path, animal_name, output_dir, 
     print(f"\n--- Applying {attack_method.upper()} Attack ---")
     
     if attack_method.lower() == 'fgsm':
-        attacker = FGSM(model, processor, epsilon=epsilon)
+        attacker = FGSM(model, processor, epsilon=epsilon, target_class=target_class)
     elif attack_method.lower() in ['pgd', 'pgm']:
         # Alpha is typically epsilon/iterations for good convergence
         alpha = epsilon / iterations
-        attacker = PGD(model, processor, epsilon=epsilon, alpha=alpha, iterations=iterations)
+        attacker = PGD(model, processor, epsilon=epsilon, alpha=alpha, iterations=iterations, target_class=target_class)
     elif attack_method.lower() == 'cw':
         # Use stronger parameters for targeted attacks
         c_param = 10.0 if target_class else 1.0
@@ -1483,7 +1527,7 @@ def main():
     parser.add_argument('--prompt', type=str, default='cat',
                        help='Text prompt for detection (source class)')
     parser.add_argument('--target', type=str, default=None,
-                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with C&W, sticker, score-based, and decision-based attacks.')
+                       help='Target class for targeted attack (e.g., "dog" to make cat->dog). Works with all attacks (FGSM, PGD, C&W, sticker, score-based, and decision-based).')
     parser.add_argument('--output-dir', type=str, default='adversarial_results',
                        help='Output directory for results')
     parser.add_argument('--epsilon', type=float, default=0.1,
@@ -1510,17 +1554,9 @@ def main():
     
     # Validate targeted attack
     if args.target:
-        for attack in attacks_to_run:
-            if attack not in ['cw', 'sticker', 'scorebased', 'decision']:
-                print(f"WARNING: Targeted attacks (--target) only supported for C&W, sticker, score-based, and decision-based attacks.")
-                print(f"         Will skip targeted mode for {attack.upper()}.")
-        # Filter to only attacks that support targeting
-        if args.attack == 'all':
-            attacks_to_run_with_target = ['cw', 'sticker', 'scorebased', 'decision']
-            attacks_to_run_without_target = [a for a in attacks_to_run if a not in attacks_to_run_with_target]
-        else:
-            attacks_to_run_with_target = [a for a in attacks_to_run if a in ['cw', 'sticker', 'scorebased', 'decision']]
-            attacks_to_run_without_target = [a for a in attacks_to_run if a not in ['cw', 'sticker', 'scorebased', 'decision']]
+        # All attacks now support targeting
+        attacks_to_run_with_target = attacks_to_run
+        attacks_to_run_without_target = []
     else:
         attacks_to_run_with_target = []
         attacks_to_run_without_target = attacks_to_run
