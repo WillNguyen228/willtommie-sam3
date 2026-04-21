@@ -1,7 +1,5 @@
 # How to Run Adversarial Attacks from Subfolder
 
-Since the adversarial attack scripts have been moved to the `Adversarial_attack_code/` subfolder, here's how to run them:
-
 ## Quick Start
 
 ### Option 1: Run from the subfolder (Recommended)
@@ -11,7 +9,7 @@ Since the adversarial attack scripts have been moved to the `Adversarial_attack_
 cd ~/sam3/Adversarial_attack_code
 
 # Activate the conda environment
-conda activate sam3_1
+conda activate sam3
 
 # Run the attack (note: use ../data/ for image paths)
 python run_adversarial_attacks.py --attack sticker --image ../data/cat.jpg --prompt cat --target dog
@@ -21,7 +19,7 @@ python run_adversarial_attacks.py --attack sticker --image ../data/cat.jpg --pro
 
 ```bash
 cd ~/sam3/Adversarial_attack_code
-/home/will/miniconda3/envs/sam3_1/bin/python run_adversarial_attacks.py --attack sticker --image ../data/cat.jpg --prompt cat --target dog
+/home/will/miniconda3/envs/sam3/bin/python run_adversarial_attacks.py --attack sticker --image ../data/cat.jpg --prompt cat --target dog
 ```
 
 ### Option 3: Use the demo scripts
@@ -39,7 +37,7 @@ bash demo_resnet_attacks.sh
 ## Important Notes
 
 1. **Image paths**: When running from the subfolder, use `../data/` instead of `data/` for images
-2. **Environment**: Make sure you're using the `sam3_1` conda environment
+2. **Environment**: Make sure you're using the `sam3` conda environment
 3. **Import fix**: The scripts have been updated to automatically add the parent directory to Python's path so the `sam3` module can be imported
 
 ## Example Commands
@@ -61,7 +59,7 @@ python run_adversarial_attacks.py --attack all --image ../data/cat.jpg --prompt 
 ## Troubleshooting
 
 If you get `ModuleNotFoundError: No module named 'sam3'`:
-- Make sure you're using the `sam3_1` conda environment
+- Make sure you're using the `sam3` conda environment
 - Verify the parent directory path fix is in the script (check lines 6-9 of run_adversarial_attacks.py)
 
 If you get `FileNotFoundError` for the image:
