@@ -2,7 +2,7 @@
 
 This repository contains several README files, each providing specific information about different aspects of the project. Below is a brief introduction to each:
 
-*READMEs from Sam3 installation
+*READMEs from Sam3 installation*
 
 - **Sam3_README.md**: The main documentation for the SAM 3 model, including its capabilities, architecture, installation, usage, and links to related resources.
 
@@ -14,7 +14,7 @@ This repository contains several README files, each providing specific informati
 
 --------------------------------------------------------
 
-READMEs for our code
+*READMEs for our code*
 
 - **Adversarial_attack_code/HOW_TO_RUN.md**: Instructions on how to run the adversarial attack scripts from the subfolder.
 
@@ -24,3 +24,15 @@ READMEs for our code
 
 
 - **Adversarial_attack_code/RESNET_ADVERSARIAL_README.md**: Documentation for the ResNet-18 adversarial attack framework, including requirements and usage.
+
+## Running Animal Classification and Segmentation Scripts
+
+To run the animal classification script using ResNet:
+```
+python run_animal_classification_resnet.py
+```
+
+To run the animal segmentation script:
+```
+python run_animal_segmentation.py
+```
