@@ -16,6 +16,8 @@ This repository contains several README files, each providing specific informati
 
 *READMEs for our code*
 
+All the attack and defense related code is in Adversarial_attack_code
+
 - **Adversarial_attack_code/HOW_TO_RUN.md**: Instructions on how to run the adversarial attack scripts from the subfolder.
 
 - **Adversarial_attack_code/ADVERSARIAL_ATTACKS_README.md**: Documentation for the adversarial attack framework on SAM3, including supported attack methods and usage examples.
@@ -24,6 +26,7 @@ This repository contains several README files, each providing specific informati
 
 
 - **Adversarial_attack_code/RESNET_ADVERSARIAL_README.md**: Documentation for the ResNet-18 adversarial attack framework, including requirements and usage.
+
 
 ## Running Animal Classification and Segmentation Scripts
 
