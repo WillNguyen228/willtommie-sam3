@@ -1,0 +1,721 @@
+Starting defense evaluation at Mon Apr 27 09:12:30 PM EDT 2026
+=============================================
+
+
+========================================
+IMAGE: cat | DEFENSE: all techniques
+========================================
+/home/will/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+======================================================================
+ADVERSARIAL DEFENSE FRAMEWORK
+======================================================================
+  Directory   : adversarial_results/cat
+  Model       : sam3
+  Techniques  : denoise, resize, jpeg
+  Output dir  : sam3_defense_results/cat
+  Images found: 6
+======================================================================
+
+  Processing: cat_adversarial_cw.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/cat/cat_adversarial_cw_comparison_2.png
+  Running SAM3 inference...
+      Detected 6 'cat'(s):
+        #1: confidence=0.1054
+        #2: confidence=0.1823
+        #3: confidence=0.2973
+        #4: confidence=0.1008
+        #5: confidence=0.9513
+        #6: confidence=0.1289
+found 6 object(s)
+      Saved: sam3_defense_results/cat/cat_adversarial_cw_defense_result_2.png
+
+  Processing: cat_adversarial_decision.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/cat/cat_adversarial_decision_comparison_2.png
+  Running SAM3 inference...
+      Detected 1 'cat'(s):
+        #1: confidence=0.9688
+found 1 object(s)
+      Saved: sam3_defense_results/cat/cat_adversarial_decision_defense_result_2.png
+
+  Processing: cat_adversarial_fgsm.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/cat/cat_adversarial_fgsm_comparison_2.png
+  Running SAM3 inference...
+      Detected 7 'cat'(s):
+        #1: confidence=0.1404
+        #2: confidence=0.1208
+        #3: confidence=0.1345
+        #4: confidence=0.1059
+        #5: confidence=0.9322
+        #6: confidence=0.1186
+        #7: confidence=0.1132
+found 7 object(s)
+      Saved: sam3_defense_results/cat/cat_adversarial_fgsm_defense_result_2.png
+
+  Processing: cat_adversarial_pgd.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/cat/cat_adversarial_pgd_comparison_2.png
+  Running SAM3 inference...
+      Detected 1 'cat'(s):
+        #1: confidence=0.9239
+found 1 object(s)
+      Saved: sam3_defense_results/cat/cat_adversarial_pgd_defense_result_2.png
+
+  Processing: cat_adversarial_scorebased.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/cat/cat_adversarial_scorebased_comparison_2.png
+  Running SAM3 inference...
+      Detected 1 'cat'(s):
+        #1: confidence=0.9534
+found 1 object(s)
+      Saved: sam3_defense_results/cat/cat_adversarial_scorebased_defense_result_2.png
+
+  Processing: cat_adversarial_sticker.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/cat/cat_adversarial_sticker_comparison_2.png
+  Running SAM3 inference...
+      Detected 26 'cat'(s):
+        #1: confidence=0.1107
+        #2: confidence=0.3644
+        #3: confidence=0.1223
+        #4: confidence=0.4185
+        #5: confidence=0.2235
+        #6: confidence=0.3671
+        #7: confidence=0.1244
+        #8: confidence=0.1457
+        #9: confidence=0.1051
+        #10: confidence=0.1092
+        #11: confidence=0.1170
+        #12: confidence=0.4329
+        #13: confidence=0.4254
+        #14: confidence=0.1946
+        #15: confidence=0.2227
+        #16: confidence=0.1184
+        #17: confidence=0.1390
+        #18: confidence=0.9210
+        #19: confidence=0.1017
+        #20: confidence=0.2078
+        #21: confidence=0.1080
+        #22: confidence=0.2106
+        #23: confidence=0.2082
+        #24: confidence=0.2041
+        #25: confidence=0.3233
+        #26: confidence=0.3055
+found 26 object(s)
+      Saved: sam3_defense_results/cat/cat_adversarial_sticker_defense_result_2.png
+
+======================================================================
+Defense evaluation complete.
+Results saved to: sam3_defense_results/cat
+======================================================================
+
+
+========================================
+IMAGE: dog | DEFENSE: all techniques
+========================================
+/home/will/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+======================================================================
+ADVERSARIAL DEFENSE FRAMEWORK
+======================================================================
+  Directory   : adversarial_results/dog
+  Model       : sam3
+  Techniques  : denoise, resize, jpeg
+  Output dir  : sam3_defense_results/dog
+  Images found: 6
+======================================================================
+
+  Processing: dog_adversarial_cw.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/dog/dog_adversarial_cw_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'dog'(s):
+        #1: confidence=0.9001
+found 1 object(s)
+      Saved: sam3_defense_results/dog/dog_adversarial_cw_defense_result_1.png
+
+  Processing: dog_adversarial_decision.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/dog/dog_adversarial_decision_comparison_1.png
+  Running SAM3 inference...
+      No 'dog' detected.
+found 0 object(s)
+      Saved: sam3_defense_results/dog/dog_adversarial_decision_defense_result_1.png
+
+  Processing: dog_adversarial_fgsm.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/dog/dog_adversarial_fgsm_comparison_1.png
+  Running SAM3 inference...
+      Detected 6 'dog'(s):
+        #1: confidence=0.1309
+        #2: confidence=0.1488
+        #3: confidence=0.1341
+        #4: confidence=0.9079
+        #5: confidence=0.1261
+        #6: confidence=0.1777
+found 6 object(s)
+      Saved: sam3_defense_results/dog/dog_adversarial_fgsm_defense_result_1.png
+
+  Processing: dog_adversarial_pgd.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/dog/dog_adversarial_pgd_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'dog'(s):
+        #1: confidence=0.8920
+found 1 object(s)
+      Saved: sam3_defense_results/dog/dog_adversarial_pgd_defense_result_1.png
+
+  Processing: dog_adversarial_scorebased.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/dog/dog_adversarial_scorebased_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'dog'(s):
+        #1: confidence=0.8966
+found 1 object(s)
+      Saved: sam3_defense_results/dog/dog_adversarial_scorebased_defense_result_1.png
+
+  Processing: dog_adversarial_sticker.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/dog/dog_adversarial_sticker_comparison_1.png
+  Running SAM3 inference...
+      Detected 9 'dog'(s):
+        #1: confidence=0.1257
+        #2: confidence=0.1475
+        #3: confidence=0.1065
+        #4: confidence=0.1029
+        #5: confidence=0.1257
+        #6: confidence=0.1342
+        #7: confidence=0.1403
+        #8: confidence=0.7564
+        #9: confidence=0.1014
+found 9 object(s)
+      Saved: sam3_defense_results/dog/dog_adversarial_sticker_defense_result_1.png
+
+======================================================================
+Defense evaluation complete.
+Results saved to: sam3_defense_results/dog
+======================================================================
+
+
+========================================
+IMAGE: human | DEFENSE: all techniques
+========================================
+/home/will/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+======================================================================
+ADVERSARIAL DEFENSE FRAMEWORK
+======================================================================
+  Directory   : adversarial_results/human
+  Model       : sam3
+  Techniques  : denoise, resize, jpeg
+  Output dir  : sam3_defense_results/human
+  Images found: 6
+======================================================================
+
+  Processing: human_adversarial_cw.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/human/human_adversarial_cw_comparison_1.png
+  Running SAM3 inference...
+      Detected 20 'human'(s):
+        #1: confidence=0.1588
+        #2: confidence=0.2104
+        #3: confidence=0.1540
+        #4: confidence=0.1382
+        #5: confidence=0.1805
+        #6: confidence=0.1128
+        #7: confidence=0.1173
+        #8: confidence=0.1418
+        #9: confidence=0.1590
+        #10: confidence=0.1213
+        #11: confidence=0.1171
+        #12: confidence=0.1248
+        #13: confidence=0.9041
+        #14: confidence=0.1632
+        #15: confidence=0.1402
+        #16: confidence=0.1218
+        #17: confidence=0.1372
+        #18: confidence=0.1475
+        #19: confidence=0.1685
+        #20: confidence=0.1143
+found 20 object(s)
+      Saved: sam3_defense_results/human/human_adversarial_cw_defense_result_1.png
+
+  Processing: human_adversarial_decision.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/human/human_adversarial_decision_comparison_1.png
+  Running SAM3 inference...
+      No 'human' detected.
+found 0 object(s)
+      Saved: sam3_defense_results/human/human_adversarial_decision_defense_result_1.png
+
+  Processing: human_adversarial_fgsm.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/human/human_adversarial_fgsm_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'human'(s):
+        #1: confidence=0.9231
+found 1 object(s)
+      Saved: sam3_defense_results/human/human_adversarial_fgsm_defense_result_1.png
+
+  Processing: human_adversarial_pgd.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/human/human_adversarial_pgd_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'human'(s):
+        #1: confidence=0.9294
+found 1 object(s)
+      Saved: sam3_defense_results/human/human_adversarial_pgd_defense_result_1.png
+
+  Processing: human_adversarial_scorebased.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/human/human_adversarial_scorebased_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'human'(s):
+        #1: confidence=0.9491
+found 1 object(s)
+      Saved: sam3_defense_results/human/human_adversarial_scorebased_defense_result_1.png
+
+  Processing: human_adversarial_sticker.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/human/human_adversarial_sticker_comparison_1.png
+  Running SAM3 inference...
+      Detected 19 'human'(s):
+        #1: confidence=0.1365
+        #2: confidence=0.1487
+        #3: confidence=0.1590
+        #4: confidence=0.1788
+        #5: confidence=0.2273
+        #6: confidence=0.1574
+        #7: confidence=0.1488
+        #8: confidence=0.1526
+        #9: confidence=0.1020
+        #10: confidence=0.2991
+        #11: confidence=0.3087
+        #12: confidence=0.1797
+        #13: confidence=0.1034
+        #14: confidence=0.1016
+        #15: confidence=0.8237
+        #16: confidence=0.1685
+        #17: confidence=0.1415
+        #18: confidence=0.2787
+        #19: confidence=0.1224
+found 19 object(s)
+      Saved: sam3_defense_results/human/human_adversarial_sticker_defense_result_1.png
+
+======================================================================
+Defense evaluation complete.
+Results saved to: sam3_defense_results/human
+======================================================================
+
+
+========================================
+IMAGE: panda | DEFENSE: all techniques
+========================================
+/home/will/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+======================================================================
+ADVERSARIAL DEFENSE FRAMEWORK
+======================================================================
+  Directory   : adversarial_results/panda
+  Model       : sam3
+  Techniques  : denoise, resize, jpeg
+  Output dir  : sam3_defense_results/panda
+  Images found: 6
+======================================================================
+
+  Processing: panda_adversarial_cw.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/panda/panda_adversarial_cw_comparison_1.png
+  Running SAM3 inference...
+      Detected 3 'panda'(s):
+        #1: confidence=0.1313
+        #2: confidence=0.9433
+        #3: confidence=0.3831
+found 3 object(s)
+      Saved: sam3_defense_results/panda/panda_adversarial_cw_defense_result_1.png
+
+  Processing: panda_adversarial_decision.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/panda/panda_adversarial_decision_comparison_1.png
+  Running SAM3 inference...
+      No 'panda' detected.
+found 0 object(s)
+      Saved: sam3_defense_results/panda/panda_adversarial_decision_defense_result_1.png
+
+  Processing: panda_adversarial_fgsm.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/panda/panda_adversarial_fgsm_comparison_1.png
+  Running SAM3 inference...
+      Detected 5 'panda'(s):
+        #1: confidence=0.1097
+        #2: confidence=0.1679
+        #3: confidence=0.2942
+        #4: confidence=0.1143
+        #5: confidence=0.1809
+found 5 object(s)
+      Saved: sam3_defense_results/panda/panda_adversarial_fgsm_defense_result_1.png
+
+  Processing: panda_adversarial_pgd.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/panda/panda_adversarial_pgd_comparison_1.png
+  Running SAM3 inference...
+      Detected 3 'panda'(s):
+        #1: confidence=0.1244
+        #2: confidence=0.9717
+        #3: confidence=0.1156
+found 3 object(s)
+      Saved: sam3_defense_results/panda/panda_adversarial_pgd_defense_result_1.png
+
+  Processing: panda_adversarial_scorebased.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/panda/panda_adversarial_scorebased_comparison_1.png
+  Running SAM3 inference...
+      Detected 2 'panda'(s):
+        #1: confidence=0.1047
+        #2: confidence=0.9748
+found 2 object(s)
+      Saved: sam3_defense_results/panda/panda_adversarial_scorebased_defense_result_1.png
+
+  Processing: panda_adversarial_sticker.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/panda/panda_adversarial_sticker_comparison_1.png
+  Running SAM3 inference...
+      Detected 2 'panda'(s):
+        #1: confidence=0.1514
+        #2: confidence=0.9717
+found 2 object(s)
+      Saved: sam3_defense_results/panda/panda_adversarial_sticker_defense_result_1.png
+
+======================================================================
+Defense evaluation complete.
+Results saved to: sam3_defense_results/panda
+======================================================================
+
+
+========================================
+IMAGE: rabbit | DEFENSE: all techniques
+========================================
+/home/will/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+======================================================================
+ADVERSARIAL DEFENSE FRAMEWORK
+======================================================================
+  Directory   : adversarial_results/rabbit
+  Model       : sam3
+  Techniques  : denoise, resize, jpeg
+  Output dir  : sam3_defense_results/rabbit
+  Images found: 6
+======================================================================
+
+  Processing: rabbit_adversarial_cw.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/rabbit/rabbit_adversarial_cw_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'rabbit'(s):
+        #1: confidence=0.9644
+found 1 object(s)
+      Saved: sam3_defense_results/rabbit/rabbit_adversarial_cw_defense_result_1.png
+
+  Processing: rabbit_adversarial_decision.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/rabbit/rabbit_adversarial_decision_comparison_1.png
+  Running SAM3 inference...
+      No 'rabbit' detected.
+found 0 object(s)
+      Saved: sam3_defense_results/rabbit/rabbit_adversarial_decision_defense_result_1.png
+
+  Processing: rabbit_adversarial_fgsm.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/rabbit/rabbit_adversarial_fgsm_comparison_1.png
+  Running SAM3 inference...
+      Detected 31 'rabbit'(s):
+        #1: confidence=0.1195
+        #2: confidence=0.1105
+        #3: confidence=0.1081
+        #4: confidence=0.1490
+        #5: confidence=0.1007
+        #6: confidence=0.1106
+        #7: confidence=0.1141
+        #8: confidence=0.1369
+        #9: confidence=0.1054
+        #10: confidence=0.1453
+        #11: confidence=0.1066
+        #12: confidence=0.1690
+        #13: confidence=0.1528
+        #14: confidence=0.1074
+        #15: confidence=0.1043
+        #16: confidence=0.1744
+        #17: confidence=0.1438
+        #18: confidence=0.1289
+        #19: confidence=0.1058
+        #20: confidence=0.1469
+        #21: confidence=0.1236
+        #22: confidence=0.1153
+        #23: confidence=0.6117
+        #24: confidence=0.3423
+        #25: confidence=0.1260
+        #26: confidence=0.1079
+        #27: confidence=0.2910
+        #28: confidence=0.1053
+        #29: confidence=0.1093
+        #30: confidence=0.1046
+        #31: confidence=0.1423
+found 31 object(s)
+      Saved: sam3_defense_results/rabbit/rabbit_adversarial_fgsm_defense_result_1.png
+
+  Processing: rabbit_adversarial_pgd.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/rabbit/rabbit_adversarial_pgd_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'rabbit'(s):
+        #1: confidence=0.9743
+found 1 object(s)
+      Saved: sam3_defense_results/rabbit/rabbit_adversarial_pgd_defense_result_1.png
+
+  Processing: rabbit_adversarial_scorebased.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/rabbit/rabbit_adversarial_scorebased_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'rabbit'(s):
+        #1: confidence=0.9780
+found 1 object(s)
+      Saved: sam3_defense_results/rabbit/rabbit_adversarial_scorebased_defense_result_1.png
+
+  Processing: rabbit_adversarial_sticker.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/rabbit/rabbit_adversarial_sticker_comparison_1.png
+  Running SAM3 inference...
+      Detected 9 'rabbit'(s):
+        #1: confidence=0.1185
+        #2: confidence=0.1467
+        #3: confidence=0.1010
+        #4: confidence=0.1192
+        #5: confidence=0.1605
+        #6: confidence=0.1790
+        #7: confidence=0.1314
+        #8: confidence=0.9747
+        #9: confidence=0.1115
+found 9 object(s)
+      Saved: sam3_defense_results/rabbit/rabbit_adversarial_sticker_defense_result_1.png
+
+======================================================================
+Defense evaluation complete.
+Results saved to: sam3_defense_results/rabbit
+======================================================================
+
+
+========================================
+IMAGE: tiger | DEFENSE: all techniques
+========================================
+/home/will/sam3/sam3/model_builder.py:8: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+======================================================================
+ADVERSARIAL DEFENSE FRAMEWORK
+======================================================================
+  Directory   : adversarial_results/tiger
+  Model       : sam3
+  Techniques  : denoise, resize, jpeg
+  Output dir  : sam3_defense_results/tiger
+  Images found: 6
+======================================================================
+
+  Processing: tiger_adversarial_cw.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/tiger/tiger_adversarial_cw_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'tiger'(s):
+        #1: confidence=0.9551
+found 1 object(s)
+      Saved: sam3_defense_results/tiger/tiger_adversarial_cw_defense_result_1.png
+
+  Processing: tiger_adversarial_decision.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/tiger/tiger_adversarial_decision_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'tiger'(s):
+        #1: confidence=0.9721
+found 1 object(s)
+      Saved: sam3_defense_results/tiger/tiger_adversarial_decision_defense_result_1.png
+
+  Processing: tiger_adversarial_fgsm.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/tiger/tiger_adversarial_fgsm_comparison_1.png
+  Running SAM3 inference...
+      Detected 11 'tiger'(s):
+        #1: confidence=0.1062
+        #2: confidence=0.1421
+        #3: confidence=0.1048
+        #4: confidence=0.1262
+        #5: confidence=0.1090
+        #6: confidence=0.1584
+        #7: confidence=0.1265
+        #8: confidence=0.8817
+        #9: confidence=0.1287
+        #10: confidence=0.1260
+        #11: confidence=0.1223
+found 11 object(s)
+      Saved: sam3_defense_results/tiger/tiger_adversarial_fgsm_defense_result_1.png
+
+  Processing: tiger_adversarial_pgd.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/tiger/tiger_adversarial_pgd_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'tiger'(s):
+        #1: confidence=0.9750
+found 1 object(s)
+      Saved: sam3_defense_results/tiger/tiger_adversarial_pgd_defense_result_1.png
+
+  Processing: tiger_adversarial_scorebased.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/tiger/tiger_adversarial_scorebased_comparison_1.png
+  Running SAM3 inference...
+      Detected 1 'tiger'(s):
+        #1: confidence=0.9773
+found 1 object(s)
+      Saved: sam3_defense_results/tiger/tiger_adversarial_scorebased_defense_result_1.png
+
+  Processing: tiger_adversarial_sticker.png
+  Applying defenses: denoise, resize, jpeg
+    Applying denoising...
+    Applying random resize & recrop...
+    Applying JPEG compression...
+    Saved comparison image: sam3_defense_results/tiger/tiger_adversarial_sticker_comparison_1.png
+  Running SAM3 inference...
+      Detected 17 'tiger'(s):
+        #1: confidence=0.1240
+        #2: confidence=0.1718
+        #3: confidence=0.1802
+        #4: confidence=0.1332
+        #5: confidence=0.1712
+        #6: confidence=0.1191
+        #7: confidence=0.1684
+        #8: confidence=0.1319
+        #9: confidence=0.2046
+        #10: confidence=0.1773
+        #11: confidence=0.1034
+        #12: confidence=0.1776
+        #13: confidence=0.1305
+        #14: confidence=0.9633
+        #15: confidence=0.1151
+        #16: confidence=0.1816
+        #17: confidence=0.1031
+found 17 object(s)
+      Saved: sam3_defense_results/tiger/tiger_adversarial_sticker_defense_result_1.png
+
+======================================================================
+Defense evaluation complete.
+Results saved to: sam3_defense_results/tiger
+======================================================================
+
+
+=============================================
+All defense tests completed at Mon Apr 27 09:20:55 PM EDT 2026
+=============================================

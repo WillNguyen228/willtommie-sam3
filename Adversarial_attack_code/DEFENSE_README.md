@@ -148,3 +148,15 @@ resnet_defense_results/
 | `run_adversarial_attacks.py` | Generates adversarial images targeting the SAM3 model using FGSM, PGD, C&W, and sticker attacks |
 | `run_resnet_adversarial_attacks.py` | Generates adversarial images targeting ResNet-18 using the same four attack methods |
 | `run_defense.py` | Applies preprocessing defenses to generated adversarial images and re-evaluates them with the target model |
+
+## Running the defense file on all images in all of the folders
+
+```bash
+./run_all_defenses.sh
+```
+
+Then you can run this to analyze the result
+
+```bash
+python analyze_defense_results.py
+```

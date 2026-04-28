@@ -1,0 +1,89 @@
+======================================================================
+ADVERSARIAL DEFENSE EVALUATION SUMMARY
+Defense Techniques: Denoise + Resize + JPEG Compression
+======================================================================
+
+OVERALL STATISTICS
+----------------------------------------------------------------------
+Total attack experiments: 37
+Initially successful attacks: 10 (27.0%)
+Attacks mitigated by defense: 10 (27.0%)
+Persistent attacks (survived defense): 0 (0.0%)
+
+Defense mitigation rate: 100.0% (of successful attacks)
+
+======================================================================
+DEFENSE EFFECTIVENESS BY ATTACK TYPE
+======================================================================
+
+CW
+  Initially successful: 3/7
+  Mitigated by defense: 3/3 (100.0%)
+  Persistent: 0
+
+DECISION
+  Initially successful: 0/6
+  No successful attacks to defend
+
+FGSM
+  Initially successful: 0/6
+  No successful attacks to defend
+
+PGD
+  Initially successful: 3/6
+  Mitigated by defense: 3/3 (100.0%)
+  Persistent: 0
+
+SCOREBASED
+  Initially successful: 0/6
+  No successful attacks to defend
+
+STICKER
+  Initially successful: 4/6
+  Mitigated by defense: 4/4 (100.0%)
+  Persistent: 0
+
+======================================================================
+DEFENSE EFFECTIVENESS BY IMAGE
+======================================================================
+
+CAT
+  Initially successful attacks: 4/7
+  Mitigated by defense: 4/4 (100.0%)
+  Persistent attacks: 0
+
+DOG
+  Initially successful attacks: 1/6
+  Mitigated by defense: 1/1 (100.0%)
+  Persistent attacks: 0
+
+HUMAN
+  Initially successful attacks: 1/6
+  Mitigated by defense: 1/1 (100.0%)
+  Persistent attacks: 0
+
+PANDA
+  Initially successful attacks: 1/6
+  Mitigated by defense: 1/1 (100.0%)
+  Persistent attacks: 0
+
+RABBIT
+  Initially successful attacks: 2/6
+  Mitigated by defense: 2/2 (100.0%)
+  Persistent attacks: 0
+
+TIGER
+  Initially successful attacks: 1/6
+  Mitigated by defense: 1/1 (100.0%)
+  Persistent attacks: 0
+
+======================================================================
+MOST RESILIENT ATTACK-IMAGE COMBINATIONS
+(Attacks that survived defense preprocessing)
+======================================================================
+
+  None! All successful attacks were mitigated.
+
+======================================================================
+End of report
+======================================================================

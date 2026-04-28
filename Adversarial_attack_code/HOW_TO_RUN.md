@@ -65,3 +65,17 @@ If you get `ModuleNotFoundError: No module named 'sam3'`:
 If you get `FileNotFoundError` for the image:
 - Use `../data/cat.jpg` instead of `data/cat.jpg` when running from the subfolder
 - Or use absolute paths: `/home/will/sam3/data/cat.jpg`
+
+## Running all attacks on all the images
+
+If you want to run all 6 attacks on the six images in the database, run this:
+
+```bash
+./run_all_targeted_attacks.sh
+```
+
+Then you can run this to analyze the effectiveness of all the attacks:
+
+```bash
+python analyze_attack_results.py
+```
